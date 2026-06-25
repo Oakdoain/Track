@@ -1,0 +1,12 @@
+[gd_scene format=3 uid="uid://bn1h4wp4usulo"]
+
+[ext_resource type="Script" uid="uid://cab6vpcw2xbps" path="res://scripts/ui/SaveUI.gd" id="1_gy63c"]
+
+[node name="SaveUI" type="Control" unique_id=1132064433]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_gy63c")

@@ -1,0 +1,295 @@
+{
+  "meta": {
+    "chapter": "第一章",
+    "chapter_intro": "一切的开始。你在陌生的房间里醒来，\n故事由此展开。",
+    "target": "寻找离开房间的方法，\n了解这里发生的一切。",
+    "initial_node": "ch01_key_found",
+    "time_options": [
+      "第一天 · 夜晚",
+      "第一天 · 深夜",
+      "第二天 · 清晨"
+    ],
+    "all_keywords": [
+      "钥匙",
+      "8号",
+      "房间",
+      "枕头",
+      "脚步声",
+      "房门",
+      "书桌",
+      "便签"
+    ],
+    "keyword_total": 20,
+    "node_total": 19
+  },
+  "graph": {
+    "nodes": [
+      {
+        "id": "ch01_wake",
+        "title": "醒来",
+        "pos": [110, 18],
+        "active": false
+      },
+      {
+        "id": "ch01_key_found",
+        "title": "发现钥匙",
+        "pos": [55, 76],
+        "active": true
+      },
+      {
+        "id": "ch01_footsteps",
+        "title": "听见脚步声",
+        "pos": [205, 76],
+        "active": false
+      },
+      {
+        "id": "ch01_check_door",
+        "title": "检查房门",
+        "pos": [35, 132],
+        "active": false
+      },
+      {
+        "id": "ch01_check_desk",
+        "title": "查看书桌",
+        "pos": [145, 132],
+        "active": false
+      },
+      {
+        "id": "ch01_desk_note",
+        "title": "发现便签",
+        "pos": [145, 176],
+        "active": false
+      }
+    ],
+    "edges": [
+      [[140, 38], [105, 76]],
+      [[150, 38], [235, 76]],
+      [[102, 100], [82, 132]],
+      [[112, 100], [172, 132]],
+      [[195, 156], [190, 176]]
+    ]
+  },
+  "nodes": {
+    "ch01_key_found": {
+      "node_type": "事件节点",
+      "time_index": 0,
+      "title": "发现钥匙",
+      "body": [
+        "你在枕头下找到一把冰冷的金属钥匙，钥匙环上刻着数字「8」。它看起来像是某扇门的钥匙。",
+        "房间里一片寂静，只有你自己的呼吸声。窗帘紧闭，月光透不进来，墙上的钟表早已停摆在某个不明的时刻。",
+        "钥匙的表面有些磨损，边缘却被保养得很好，似乎经常被使用。你将它拿在手里，金属的凉意让你更加清醒。",
+        "远处传来一阵轻微的脚步声，像是有人在走廊尽头来回踱步，又像是这栋建筑本身发出的叹息。",
+        "你不知道这把钥匙属于什么，也不知道自己为什么会出现在这里。但有一点可以确定：这把钥匙，也许能打开某个答案。"
+      ],
+      "quote": "“    这把钥匙，也许能打开某个答案。    ”",
+      "keywords": ["钥匙", "8号", "房间", "枕头", "脚步声"],
+      "clues": ["clue_key_8", "clue_pillow", "clue_footsteps"],
+      "choices": [
+        {
+          "icon": "search",
+          "title": "检查房门",
+          "desc": "看看能不能离开这里，或许门就是答案的起点。",
+          "target": "ch01_check_door"
+        },
+        {
+          "icon": "book",
+          "title": "查看书桌",
+          "desc": "也许能找到其他线索，帮助你理解这间房间。",
+          "target": "ch01_check_desk"
+        },
+        {
+          "icon": "archive",
+          "title": "暂时收起钥匙",
+          "desc": "先收好钥匙，留待更需要的时候再使用。",
+          "target": "ch01_hold_key"
+        }
+      ],
+      "attrs": {
+        "type": "事件节点",
+        "condition": "—",
+        "character": "你",
+        "reward": "+2%"
+      }
+    },
+    "ch01_check_door": {
+      "node_type": "探索节点",
+      "time_index": 0,
+      "title": "检查房门",
+      "body": [
+        "你走到房门前，把手贴在门板上。木门冰冷，像是已经很久没有被人从里面打开过。",
+        "门锁的位置有明显磨损，说明它曾经被频繁使用。你尝试转动门把手，但门纹丝不动。",
+        "你把耳朵贴近门缝。外面没有说话声，只有某种极轻的、重复的摩擦声。像脚步，又不像脚步。"
+      ],
+      "quote": "“    门外的声音，像是在等你做出选择。    ”",
+      "keywords": ["房门", "脚步声"],
+      "clues": ["clue_locked_door", "clue_footsteps"],
+      "choices": [
+        {
+          "icon": "key",
+          "title": "尝试使用钥匙",
+          "desc": "把8号钥匙插进门锁，看看是否匹配。",
+          "target": "ch01_try_key"
+        },
+        {
+          "icon": "book",
+          "title": "返回查看书桌",
+          "desc": "门暂时打不开，也许房间内还有其他提示。",
+          "target": "ch01_check_desk"
+        }
+      ],
+      "attrs": {
+        "type": "探索节点",
+        "condition": "发现8号钥匙",
+        "character": "你",
+        "reward": "+3%"
+      }
+    },
+    "ch01_check_desk": {
+      "node_type": "线索节点",
+      "time_index": 0,
+      "title": "查看书桌",
+      "body": [
+        "书桌靠在墙边，桌面被整理得过分干净。没有灰尘，也没有生活痕迹，像是有人在你醒来前刚刚清理过。",
+        "抽屉没有上锁。你拉开第一层，看见里面压着一张便签。",
+        "便签上的字迹被划掉了大半，只剩下几个断裂的编号。你隐约能辨认出其中一个数字：8。"
+      ],
+      "quote": "“    被划掉的内容，往往比留下的内容更重要。    ”",
+      "keywords": ["书桌", "便签", "8号"],
+      "clues": ["clue_desk_note"],
+      "choices": [
+        {
+          "icon": "search",
+          "title": "检查便签背面",
+          "desc": "也许背面还有其他记录。",
+          "target": "ch01_desk_note"
+        },
+        {
+          "icon": "search",
+          "title": "回到房门前",
+          "desc": "现在你可以重新检查房门。",
+          "target": "ch01_check_door"
+        }
+      ],
+      "attrs": {
+        "type": "线索节点",
+        "condition": "查看书桌",
+        "character": "你",
+        "reward": "+3%"
+      }
+    },
+    "ch01_hold_key": {
+      "node_type": "事件节点",
+      "time_index": 0,
+      "title": "暂时收起钥匙",
+      "body": [
+        "你没有立刻使用钥匙，而是把它收进口袋。",
+        "金属贴着衣料发出轻微声响。就在这时，门外的脚步声突然停住了。",
+        "房间重新安静下来，但这种安静不再像刚才那样自然。"
+      ],
+      "quote": "“    你收起了钥匙，也收起了第一个答案。    ”",
+      "keywords": ["钥匙", "脚步声"],
+      "clues": ["clue_key_8", "clue_footsteps"],
+      "choices": [
+        {
+          "icon": "search",
+          "title": "重新检查房门",
+          "desc": "脚步声停止后，门外也许发生了变化。",
+          "target": "ch01_check_door"
+        },
+        {
+          "icon": "book",
+          "title": "查看书桌",
+          "desc": "先从房间内部寻找更多线索。",
+          "target": "ch01_check_desk"
+        }
+      ],
+      "attrs": {
+        "type": "事件节点",
+        "condition": "发现钥匙",
+        "character": "你",
+        "reward": "+1%"
+      }
+    },
+    "ch01_try_key": {
+      "node_type": "事件节点",
+      "time_index": 0,
+      "title": "钥匙不匹配",
+      "body": [
+        "你把钥匙插进门锁。钥匙能进入锁孔，但无法完全转动。",
+        "这不是这扇门的钥匙。",
+        "你正准备拔出钥匙时，门外再次响起脚步声。这一次，声音停在了门前。"
+      ],
+      "quote": "“    这把钥匙能打开某个地方，但不是这里。    ”",
+      "keywords": ["钥匙", "房门", "脚步声"],
+      "clues": ["clue_key_8", "clue_locked_door", "clue_footsteps"],
+      "choices": [
+        {
+          "icon": "book",
+          "title": "立刻查看书桌",
+          "desc": "也许房间内有钥匙对应的编号。",
+          "target": "ch01_check_desk"
+        }
+      ],
+      "attrs": {
+        "type": "事件节点",
+        "condition": "检查房门",
+        "character": "你",
+        "reward": "+4%"
+      }
+    },
+    "ch01_desk_note": {
+      "node_type": "线索节点",
+      "time_index": 0,
+      "title": "发现便签",
+      "body": [
+        "你翻过便签，背面只有一行很淡的字。",
+        "「不要相信第一次听见的声音。」",
+        "这句话看起来不像警告，更像是某种解题提示。"
+      ],
+      "quote": "“    不要相信第一次听见的声音。    ”",
+      "keywords": ["便签", "脚步声", "书桌"],
+      "clues": ["clue_desk_note", "clue_footsteps"],
+      "choices": [
+        {
+          "icon": "search",
+          "title": "重新听门外声音",
+          "desc": "如果声音本身就是线索，就需要重新判断。",
+          "target": "ch01_footsteps"
+        }
+      ],
+      "attrs": {
+        "type": "线索节点",
+        "condition": "检查便签背面",
+        "character": "你",
+        "reward": "+5%"
+      }
+    },
+    "ch01_footsteps": {
+      "node_type": "音频节点",
+      "time_index": 0,
+      "title": "重新辨认脚步声",
+      "body": [
+        "你闭上眼睛，试着重新听门外的脚步声。",
+        "声音并不是从走廊深处传来，而是更近，像是从门板内部，或者墙体夹层里传出。",
+        "这栋房间的结构可能不是你看到的这样。"
+      ],
+      "quote": "“    声音的位置，比声音本身更重要。    ”",
+      "keywords": ["脚步声", "房间"],
+      "clues": ["clue_footsteps", "clue_locked_door"],
+      "choices": [
+        {
+          "icon": "search",
+          "title": "检查墙面",
+          "desc": "如果声音来自墙体，墙上也许有隐藏结构。",
+          "target": "ch01_key_found"
+        }
+      ],
+      "attrs": {
+        "type": "音频节点",
+        "condition": "发现便签",
+        "character": "你",
+        "reward": "+5%"
+      }
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "clue_key_8": {
+    "title": "8号钥匙",
+    "desc": "钥匙环上刻着数字「8」。",
+    "icon": "key",
+    "type": "物证"
+  },
+  "clue_pillow": {
+    "title": "枕头",
+    "desc": "钥匙藏在枕头下。",
+    "icon": "rect",
+    "type": "场景线索"
+  },
+  "clue_footsteps": {
+    "title": "脚步声",
+    "desc": "远处传来间断脚步声。",
+    "icon": "footprints",
+    "type": "音频线索"
+  },
+  "clue_locked_door": {
+    "title": "上锁的房门",
+    "desc": "房门从外侧锁住，门缝处没有光线。",
+    "icon": "search",
+    "type": "场景线索"
+  },
+  "clue_desk_note": {
+    "title": "书桌便签",
+    "desc": "便签上写着一串被划掉的房间编号。",
+    "icon": "book",
+    "type": "文本线索"
+  }
+}
