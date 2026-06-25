@@ -516,10 +516,7 @@ func _build_right_panel() -> Control:
 
 
 func _load_demo_node() -> void:
-	var ok: bool = StoryManager.load_story(
-		"res://data/story/chapter_01.json",
-		"res://data/clues/clues.json"
-	)
+	var ok: bool = StoryManager.ensure_story_loaded()
 
 	if not ok:
 		push_error("MainUI: failed to load story data.")
@@ -533,7 +530,7 @@ func _render_node(data: Dictionary) -> void:
 
 	chapter_dropdown.clear()
 
-	var time_options_raw = data.get("time_options", [])
+	var time_options_raw: Variant = data.get("time_options", [])
 
 	if time_options_raw is Array:
 		for item in time_options_raw:
@@ -548,7 +545,7 @@ func _render_node(data: Dictionary) -> void:
 	_clear_children(keyword_grid)
 
 	var keywords: Array = []
-	var raw_keywords = data.get("keywords", [])
+	var raw_keywords: Variant = data.get("keywords", [])
 
 	if raw_keywords is Array:
 		keywords = raw_keywords
@@ -574,7 +571,7 @@ func _render_node(data: Dictionary) -> void:
 	story_body_label.clear()
 
 	var body: Array = []
-	var raw_body = data.get("body", [])
+	var raw_body: Variant = data.get("body", [])
 
 	if raw_body is Array:
 		body = raw_body
@@ -589,7 +586,7 @@ func _render_node(data: Dictionary) -> void:
 
 	_clear_children(choice_list)
 
-	var choices = data.get("choices", [])
+	var choices: Variant = data.get("choices", [])
 
 	if choices is Array:
 		for choice in choices:
@@ -607,7 +604,7 @@ func _render_node(data: Dictionary) -> void:
 
 	_clear_children(clue_list)
 
-	var clues = data.get("clues", [])
+	var clues: Variant = data.get("clues", [])
 
 	if clues is Array:
 		for clue in clues:
@@ -623,7 +620,7 @@ func _render_node(data: Dictionary) -> void:
 	_clear_children(graph_slot)
 
 	var graph_data: Dictionary = {}
-	var raw_graph = data.get("graph", {})
+	var raw_graph: Variant = data.get("graph", {})
 
 	if raw_graph is Dictionary:
 		graph_data = raw_graph
@@ -631,7 +628,7 @@ func _render_node(data: Dictionary) -> void:
 	graph_slot.add_child(_mini_graph(graph_data))
 
 	var attrs: Dictionary = {}
-	var raw_attrs = data.get("attrs", {})
+	var raw_attrs: Variant = data.get("attrs", {})
 
 	if raw_attrs is Dictionary:
 		attrs = raw_attrs
@@ -824,14 +821,14 @@ func _mini_graph(graph_data: Dictionary) -> Control:
 	graph.custom_minimum_size = Vector2(330, 188)
 	panel.add_child(graph)
 
-	var edges = graph_data.get("edges", [])
+	var edges: Variant = graph_data.get("edges", [])
 
 	if edges is Array:
 		for edge in edges:
 			if edge is Array and edge.size() >= 2:
 				graph.add_child(_line(edge[0], edge[1], C_LINE, 1))
 
-	var nodes = graph_data.get("nodes", [])
+	var nodes: Variant = graph_data.get("nodes", [])
 
 	if nodes is Array:
 		for node_data in nodes:
@@ -847,7 +844,7 @@ func _mini_graph(graph_data: Dictionary) -> Control:
 	return panel
 
 
-func _graph_node(text: String, pos, active: bool) -> Control:
+func _graph_node(text: String, pos: Variant, active: bool) -> Control:
 	var bg_color := C_BLUE if active else Color.TRANSPARENT
 	var border_color := C_BLUE_DARK if active else C_BLUE
 	var text_color := C_WHITE if active else C_BLUE
@@ -864,7 +861,7 @@ func _graph_node(text: String, pos, active: bool) -> Control:
 	return node
 
 
-func _line(from_pos, to_pos, color: Color, width: int) -> ColorRect:
+func _line(from_pos: Variant, to_pos: Variant, color: Color, width: int) -> ColorRect:
 	var from_vec := Vector2.ZERO
 	var to_vec := Vector2.ZERO
 

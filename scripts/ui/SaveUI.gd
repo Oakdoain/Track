@@ -11,6 +11,7 @@ const AUTO_SAVE_SLOT := 0
 
 const SAVE_DIR := "user://saves"
 const AUTO_SAVE_PATH := "user://saves/save_00.json"
+const MAIN_UI_SCENE := "res://scenes/ui/MainUI.tscn"
 
 const TOP_BAR_MARGIN_LEFT := 24
 const TOP_BAR_MARGIN_RIGHT := 24
@@ -530,6 +531,10 @@ func _build_right_panel() -> Control:
 	overwrite.pressed.connect(_overwrite_selected_save)
 	box.add_child(overwrite)
 
+	var load_button := _large_action_button(ICON_FOLDER_OPEN, "读取当前档位", false)
+	load_button.pressed.connect(_load_selected_save)
+	box.add_child(load_button)
+
 	var backup := _large_action_button(ICON_DATABASE, "创建备份", false)
 	backup.pressed.connect(_backup_selected_save)
 	box.add_child(backup)
@@ -876,6 +881,9 @@ func _make_auto_save_data() -> Dictionary:
 
 	var manager: Node = get_node_or_null("/root/StoryManager")
 
+	if manager != null and manager.has_method("ensure_story_loaded"):
+		manager.call("ensure_story_loaded")
+
 	if manager != null and manager.has_method("get_render_data"):
 		var raw_render: Variant = manager.call("get_render_data")
 
@@ -908,11 +916,7 @@ func _make_auto_save_data() -> Dictionary:
 		"save_unix": now_unix,
 		"current_node_id": current_node_id,
 		"current_title": title,
-		"state": {
-			"read_node_ids": [],
-			"discovered_keywords": [],
-			"discovered_clues": []
-		},
+		"state": _get_story_state_from_manager(manager),
 		"note": "自动存档"
 	}
 
@@ -1068,6 +1072,36 @@ func _backup_selected_save() -> void:
 	_write_json(SAVE_DIR + "/backup_%02d.json" % slot, backup_data)
 
 
+func _load_selected_save() -> void:
+	if save_slots.is_empty() or selected_save_index < 0 or selected_save_index >= save_slots.size():
+		return
+
+	var data_variant: Variant = save_slots[selected_save_index]
+
+	if not (data_variant is Dictionary):
+		return
+
+	var data: Dictionary = data_variant
+
+	if bool(data.get("is_empty", false)):
+		push_warning("SaveUI: 空档位不可读取。")
+		return
+
+	var manager: Node = get_node_or_null("/root/StoryManager")
+
+	if manager == null or not manager.has_method("restore_from_save"):
+		push_warning("SaveUI: StoryManager.restore_from_save 不可用。")
+		return
+
+	var restored: Variant = manager.call("restore_from_save", data)
+
+	if not bool(restored):
+		push_warning("SaveUI: 读取当前档位失败。")
+		return
+
+	_change_scene_if_exists(MAIN_UI_SCENE)
+
+
 func _find_first_empty_manual_slot_index() -> int:
 	for i in range(1, save_slots.size()):
 		var data_variant: Variant = save_slots[i]
@@ -1087,6 +1121,9 @@ func _make_runtime_save_data(slot: int, save_name: String) -> Dictionary:
 
 	var manager: Node = get_node_or_null("/root/StoryManager")
 
+	if manager != null and manager.has_method("ensure_story_loaded"):
+		manager.call("ensure_story_loaded")
+
 	if manager != null and manager.has_method("get_render_data"):
 		var raw_render: Variant = manager.call("get_render_data")
 
@@ -1095,24 +1132,6 @@ func _make_runtime_save_data(slot: int, save_name: String) -> Dictionary:
 
 	if manager != null and manager.has_method("get_current_node_id"):
 		current_node_id = str(manager.call("get_current_node_id"))
-
-	var read_nodes: Array = []
-	var keywords: Array = []
-	var clues: Array = []
-
-	if manager != null:
-		var raw_read: Variant = manager.get("read_node_ids")
-		var raw_keywords: Variant = manager.get("discovered_keywords")
-		var raw_clues: Variant = manager.get("discovered_clues")
-
-		if raw_read is Dictionary:
-			read_nodes = raw_read.keys()
-
-		if raw_keywords is Dictionary:
-			keywords = raw_keywords.keys()
-
-		if raw_clues is Dictionary:
-			clues = raw_clues.keys()
 
 	var read_nodes_text: String = str(render_data.get("read_nodes", "0 / 0"))
 	var progress_text: String = str(render_data.get("chapter_explore", "0%"))
@@ -1137,12 +1156,34 @@ func _make_runtime_save_data(slot: int, save_name: String) -> Dictionary:
 		"save_unix": now_unix,
 		"current_node_id": current_node_id,
 		"current_title": title,
-		"state": {
-			"read_node_ids": read_nodes,
-			"discovered_keywords": keywords,
-			"discovered_clues": clues
-		},
+		"state": _get_story_state_from_manager(manager),
 		"note": "手动档位"
+	}
+
+
+func _get_story_state_from_manager(manager: Node) -> Dictionary:
+	var read_nodes: Array = []
+	var keywords: Array = []
+	var clues: Array = []
+
+	if manager != null:
+		var raw_read: Variant = manager.get("read_node_ids")
+		var raw_keywords: Variant = manager.get("discovered_keywords")
+		var raw_clues: Variant = manager.get("discovered_clues")
+
+		if raw_read is Dictionary:
+			read_nodes = raw_read.keys()
+
+		if raw_keywords is Dictionary:
+			keywords = raw_keywords.keys()
+
+		if raw_clues is Dictionary:
+			clues = raw_clues.keys()
+
+	return {
+		"read_node_ids": read_nodes,
+		"discovered_keywords": keywords,
+		"discovered_clues": clues
 	}
 
 

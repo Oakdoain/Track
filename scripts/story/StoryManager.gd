@@ -9,6 +9,10 @@ var discovered_keywords: Dictionary = {}
 var discovered_clues: Dictionary = {}
 
 
+const DEFAULT_STORY_PATH := "res://data/story/chapter_01.json"
+const DEFAULT_CLUES_PATH := "res://data/clues/clues.json"
+
+
 func load_story(story_path: String, clues_path: String) -> bool:
 	story_data = _read_json(story_path)
 	clue_data = _read_json(clues_path)
@@ -37,6 +41,17 @@ func load_story(story_path: String, clues_path: String) -> bool:
 	return true
 
 
+func has_story_loaded() -> bool:
+	return not story_data.is_empty() and not _get_nodes().is_empty()
+
+
+func ensure_story_loaded() -> bool:
+	if has_story_loaded():
+		return true
+
+	return load_story(DEFAULT_STORY_PATH, DEFAULT_CLUES_PATH)
+
+
 func get_render_data() -> Dictionary:
 	var node := _get_current_node()
 	var meta := _get_meta()
@@ -63,7 +78,7 @@ func get_render_data() -> Dictionary:
 	var progress := int(round(float(read_count) / float(total_node_count) * 100.0))
 
 	var body: Array = []
-	var raw_body = node.get("body", [])
+	var raw_body: Variant = node.get("body", [])
 
 	if raw_body is Array:
 		body = raw_body
@@ -130,7 +145,7 @@ func choose_by_title(choice_title: String) -> bool:
 	if node.is_empty():
 		return false
 
-	var choices = node.get("choices", [])
+	var choices: Variant = node.get("choices", [])
 
 	if not (choices is Array):
 		return false
@@ -166,6 +181,54 @@ func get_current_node_id() -> String:
 	return current_node_id
 
 
+func restore_from_save(save_data: Dictionary) -> bool:
+	if save_data.is_empty() or bool(save_data.get("is_empty", false)):
+		return false
+
+	if not ensure_story_loaded():
+		return false
+
+	var saved_node_id: String = str(save_data.get("current_node_id", ""))
+
+	if saved_node_id == "" or not _get_nodes().has(saved_node_id):
+		push_warning("StoryManager: save target node not found: " + saved_node_id)
+		return false
+
+	read_node_ids.clear()
+	discovered_keywords.clear()
+	discovered_clues.clear()
+
+	var state: Dictionary = {}
+	var raw_state: Variant = save_data.get("state", {})
+
+	if raw_state is Dictionary:
+		state = raw_state
+
+	_restore_string_set(read_node_ids, state.get("read_node_ids", []))
+	_restore_string_set(discovered_keywords, state.get("discovered_keywords", []))
+	_restore_string_set(discovered_clues, state.get("discovered_clues", []))
+
+	current_node_id = saved_node_id
+	_apply_node_discovery(current_node_id)
+
+	return true
+
+
+func _restore_string_set(target: Dictionary, raw_values: Variant) -> void:
+	if raw_values is Array:
+		for value in raw_values:
+			var key: String = str(value)
+
+			if key != "":
+				target[key] = true
+	elif raw_values is Dictionary:
+		for value in raw_values.keys():
+			var key: String = str(value)
+
+			if key != "":
+				target[key] = true
+
+
 func _apply_node_discovery(node_id: String) -> void:
 	var nodes := _get_nodes()
 
@@ -174,18 +237,18 @@ func _apply_node_discovery(node_id: String) -> void:
 
 	read_node_ids[node_id] = true
 
-	var node = nodes[node_id]
+	var node: Variant = nodes[node_id]
 
 	if not (node is Dictionary):
 		return
 
-	var keywords = node.get("keywords", [])
+	var keywords: Variant = node.get("keywords", [])
 
 	if keywords is Array:
 		for keyword in keywords:
 			discovered_keywords[str(keyword)] = true
 
-	var clues = node.get("clues", [])
+	var clues: Variant = node.get("clues", [])
 
 	if clues is Array:
 		for clue_id in clues:
@@ -194,7 +257,7 @@ func _apply_node_discovery(node_id: String) -> void:
 
 func _resolve_node_clues(node: Dictionary) -> Array:
 	var result: Array = []
-	var clue_ids = node.get("clues", [])
+	var clue_ids: Variant = node.get("clues", [])
 
 	if not (clue_ids is Array):
 		return result
@@ -218,7 +281,7 @@ func _resolve_node_clues(node: Dictionary) -> Array:
 	return result
 
 
-func _normalize_graph(raw_graph) -> Dictionary:
+func _normalize_graph(raw_graph: Variant) -> Dictionary:
 	var result := {
 		"nodes": [],
 		"edges": []
@@ -227,7 +290,7 @@ func _normalize_graph(raw_graph) -> Dictionary:
 	if not (raw_graph is Dictionary):
 		return result
 
-	var raw_nodes = raw_graph.get("nodes", [])
+	var raw_nodes: Variant = raw_graph.get("nodes", [])
 
 	if raw_nodes is Array:
 		for raw_node in raw_nodes:
@@ -238,7 +301,7 @@ func _normalize_graph(raw_graph) -> Dictionary:
 			node["pos"] = _to_vector2(raw_node.get("pos", [0, 0]))
 			result["nodes"].append(node)
 
-	var raw_edges = raw_graph.get("edges", [])
+	var raw_edges: Variant = raw_graph.get("edges", [])
 
 	if raw_edges is Array:
 		for raw_edge in raw_edges:
@@ -256,7 +319,7 @@ func _normalize_graph(raw_graph) -> Dictionary:
 	return result
 
 
-func _to_vector2(value) -> Vector2:
+func _to_vector2(value: Variant) -> Vector2:
 	if value is Array and value.size() >= 2:
 		return Vector2(float(value[0]), float(value[1]))
 
@@ -272,7 +335,7 @@ func _get_current_node() -> Dictionary:
 	if not nodes.has(current_node_id):
 		return {}
 
-	var node = nodes[current_node_id]
+	var node: Variant = nodes[current_node_id]
 
 	if node is Dictionary:
 		return node
@@ -281,7 +344,7 @@ func _get_current_node() -> Dictionary:
 
 
 func _get_meta() -> Dictionary:
-	var meta = story_data.get("meta", {})
+	var meta: Variant = story_data.get("meta", {})
 
 	if meta is Dictionary:
 		return meta
@@ -290,7 +353,7 @@ func _get_meta() -> Dictionary:
 
 
 func _get_nodes() -> Dictionary:
-	var nodes = story_data.get("nodes", {})
+	var nodes: Variant = story_data.get("nodes", {})
 
 	if nodes is Dictionary:
 		return nodes
@@ -300,7 +363,7 @@ func _get_nodes() -> Dictionary:
 
 func _get_all_keywords() -> Array:
 	var meta := _get_meta()
-	var all_keywords = meta.get("all_keywords", [])
+	var all_keywords: Variant = meta.get("all_keywords", [])
 
 	if all_keywords is Array:
 		return all_keywords
@@ -309,12 +372,12 @@ func _get_all_keywords() -> Array:
 	var nodes := _get_nodes()
 
 	for node_id in nodes.keys():
-		var node = nodes[node_id]
+		var node: Variant = nodes[node_id]
 
 		if not (node is Dictionary):
 			continue
 
-		var keywords = node.get("keywords", [])
+		var keywords: Variant = node.get("keywords", [])
 
 		if not (keywords is Array):
 			continue
