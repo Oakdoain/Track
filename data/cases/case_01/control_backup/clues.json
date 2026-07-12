@@ -1,0 +1,123 @@
+{
+	"clues": [
+		{
+			"id": "clue_handover_log",
+			"title": "控制室交接记录",
+			"type": "文本线索",
+			"source_node": "node_0022",
+			"summary": "记录中出现与静默巡检矛盾的 A-17 自动启动时间。"
+		},
+		{
+			"id": "clue_backup_rack_state",
+			"title": "备份机柜状态灯",
+			"type": "现场线索",
+			"source_node": "node_0021",
+			"summary": "备份机柜在复查时仍保持待机状态。"
+		},
+		{
+			"id": "clue_a17_auto_start",
+			"title": "A-17 自动启动",
+			"type": "记录线索",
+			"source_node": "node_0022",
+			"summary": "A-17 在静默巡检期间自动启动。"
+		},
+		{
+			"id": "clue_backup_reel_a17",
+			"title": "A-17 备份卷",
+			"type": "物证线索",
+			"source_node": "node_0023",
+			"summary": "备份卷显示案发前后存在自动写入记录。"
+		},
+		{
+			"id": "clue_a17_timestamp",
+			"title": "20:16:42 脚步声",
+			"type": "音频线索",
+			"source_node": "node_0023",
+			"summary": "备份录音中出现短促脚步声。"
+		},
+		{
+			"id": "clue_room_layout",
+			"title": "控制室结构图",
+			"type": "图纸线索",
+			"source_node": "node_0024",
+			"summary": "结构图显示控制室、人声棚和外侧通道的相对位置。"
+		},
+		{
+			"id": "clue_double_window",
+			"title": "双层观察窗",
+			"type": "结构线索",
+			"source_node": "node_0024",
+			"summary": "观察窗会削弱人声棚内部声响。"
+		},
+		{
+			"id": "clue_vocal_booth_carpet",
+			"title": "人声棚厚毯",
+			"type": "现场线索",
+			"source_node": "node_0025",
+			"summary": "厚毯会让棚内脚步声变得低闷。"
+		},
+		{
+			"id": "clue_absorption_panel",
+			"title": "吸音墙完整",
+			"type": "现场线索",
+			"source_node": "node_0025",
+			"summary": "吸音墙没有被临时挪动的痕迹。"
+		},
+		{
+			"id": "clue_source_first_judgment",
+			"title": "脚步声来源初判",
+			"type": "推理线索",
+			"source_node": "node_0026",
+			"summary": "脚步声可能不来自人声棚内部。"
+		},
+		{
+			"id": "clue_spectrum_placeholder",
+			"title": "频谱占位记录",
+			"type": "占位线索",
+			"source_node": "node_0027",
+			"summary": "第二阶段只记录人工听辨，不展示真实频谱。"
+		},
+		{
+			"id": "clue_air_conditioner_noise",
+			"title": "空调底噪连续",
+			"type": "音频线索",
+			"source_node": "node_0027",
+			"summary": "底噪连续性不支持录音被拆段拼接。"
+		},
+		{
+			"id": "clue_door_gap",
+			"title": "控制室门缝",
+			"type": "结构线索",
+			"source_node": "node_0028",
+			"summary": "老化门缝可能让外侧通道声音进入控制室。"
+		},
+		{
+			"id": "clue_hard_corridor_floor",
+			"title": "通道硬质地面",
+			"type": "现场线索",
+			"source_node": "node_0028",
+			"summary": "硬质地面会产生清晰的鞋跟落点。"
+		},
+		{
+			"id": "clue_corridor_echo",
+			"title": "走廊回声",
+			"type": "音频线索",
+			"source_node": "node_0029",
+			"summary": "走廊回声更接近 A-17 中脚步声的反射。"
+		},
+		{
+			"id": "clue_final_position_judgment",
+			"title": "脚步声位置判断",
+			"type": "推理线索",
+			"source_node": "node_0030",
+			"summary": "20:16:42 的脚步声不在人声棚内。"
+		},
+		{
+			"id": "clue_outer_corridor_scuff",
+			"title": "外侧通道擦痕",
+			"type": "现场线索",
+			"source_node": "node_0031",
+			"summary": "门边灰尘被蹭开，位置正对控制室门缝。"
+		}
+	]
+}

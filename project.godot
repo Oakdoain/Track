@@ -18,6 +18,7 @@ config/icon="res://icon.svg"
 [autoload]
 
 StoryManager="*uid://dih1cw41o7kau"
+AudioManager="*res://scripts/audio/AudioManager.gd"
 
 [display]
 

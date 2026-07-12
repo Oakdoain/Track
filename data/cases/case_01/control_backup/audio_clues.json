@@ -1,0 +1,38 @@
+{
+	"audio_clues": [
+		{
+			"id": "audio_backup_a17",
+			"title": "备份录音 A-17",
+			"file": "res://audio/clues/studio_noise_01.ogg",
+			"duration": 42.0,
+			"type": "环境音",
+			"source": "控制室备份录音",
+			"summary": "一段包含空调低频噪声、远处脚步声与低频电流声的环境录音。",
+			"source_node": "node_0023",
+			"important_timestamps": [
+				{
+					"time": 12.4,
+					"label": "疑似脚步声",
+					"description": "右声道出现短促脚步声。"
+				}
+			]
+		},
+		{
+			"id": "audio_corridor_echo",
+			"title": "走廊回声比对",
+			"file": "",
+			"duration": 18.0,
+			"type": "占位音频",
+			"source": "外侧通道人工比对",
+			"summary": "第二阶段占位数据，用于记录走廊回声比对结论，不接入真实播放。",
+			"source_node": "node_0029",
+			"important_timestamps": [
+				{
+					"time": 4.8,
+					"label": "短促反射",
+					"description": "反射尾音接近 A-17 中的脚步声。"
+				}
+			]
+		}
+	]
+}

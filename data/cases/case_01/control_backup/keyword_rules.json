@@ -1,0 +1,44 @@
+{
+	"keyword_rules": [
+		{
+			"keyword": "控制室",
+			"source_nodes": ["node_0021", "node_0024", "node_0030"],
+			"note": "第二阶段仅用于数据显示，不做正文自由选词。"
+		},
+		{
+			"keyword": "交接记录",
+			"source_nodes": ["node_0022"],
+			"note": "第二阶段仅用于数据显示，不做关键词连线。"
+		},
+		{
+			"keyword": "备份录音",
+			"source_nodes": ["node_0023", "node_0027"],
+			"note": "第二阶段仅用于数据显示。"
+		},
+		{
+			"keyword": "结构图",
+			"source_nodes": ["node_0024"],
+			"note": "第二阶段仅用于数据显示。"
+		},
+		{
+			"keyword": "人声棚",
+			"source_nodes": ["node_0025", "node_0032"],
+			"note": "第二阶段仅用于数据显示。"
+		},
+		{
+			"keyword": "脚步声",
+			"source_nodes": ["node_0026", "node_0030"],
+			"note": "第二阶段仅用于数据显示。"
+		},
+		{
+			"keyword": "门缝",
+			"source_nodes": ["node_0028", "node_0031"],
+			"note": "第二阶段仅用于数据显示。"
+		},
+		{
+			"keyword": "走廊回声",
+			"source_nodes": ["node_0029"],
+			"note": "第二阶段仅用于数据显示。"
+		}
+	]
+}

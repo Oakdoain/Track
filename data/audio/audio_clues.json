@@ -1,0 +1,23 @@
+{
+	"audio_clues": [
+		{
+			"id": "audio_studio_noise_01",
+			"title": "录音棚底噪 01",
+			"file": "res://data/audio/clues/studio_noise_01.ogg",
+			"duration": 42.0,
+			"type": "环境音",
+			"source": "控制室备份录音",
+			"summary": "一段包含空调低频噪声、远处脚步声与低频电流声的环境录音。",
+			"unlock_node": "ch01_key_found",
+			"linked_clues": ["clue_air_conditioner_noise", "clue_hallway_footstep"],
+			"keywords": ["底噪", "脚步声", "隔音异常"],
+			"important_timestamps": [
+				{
+					"time": 12.4,
+					"label": "疑似脚步声",
+					"description": "右声道出现短促脚步声。"
+				}
+			]
+		}
+	]
+}

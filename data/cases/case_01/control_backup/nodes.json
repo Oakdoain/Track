@@ -1,0 +1,414 @@
+{
+	"case_id": "case_01_control_backup",
+	"chapter_title": "控制室备份录音",
+	"chapter_intro": "复查控制室记录、结构图与备份录音，判断 20:16:42 的脚步声来源。",
+	"current_goal": "确认备份录音中的脚步声是否真的来自人声棚内部。",
+	"discovered_keywords": ["控制室", "备份录音", "交接记录"],
+	"initial_node_id": "node_0021",
+	"nodes": [
+		{
+			"node_id": "node_0021",
+			"title": "控制室复查",
+			"icon_key": "start",
+			"node_type": "调查节点",
+			"location": "蓝室录音棚 / 控制室",
+			"time_label": "1999-02-17 23:40",
+			"characters": ["你", "值班录音师"],
+			"body": [
+				"控制室的监听台仍保持案发当晚的状态。推子被归零，监听音箱关闭，只有备份机柜的状态灯还在缓慢闪烁。",
+				"值班录音师留下的交接夹放在台面右侧，纸页边缘有被反复翻动的折痕。",
+				"你需要先核对交接记录，再决定是否调取备份录音。"
+			],
+			"audio_clues": [],
+			"text_clues": ["clue_handover_log", "clue_backup_rack_state"],
+			"room_refs": ["control_room_console", "backup_rack"],
+			"choices": [
+				{
+					"title": "查看控制室交接记录",
+					"to": "node_0022"
+				},
+				{
+					"title": "调取备份录音 A-17",
+					"to": "node_0023"
+				},
+				{
+					"title": "查看控制室与人声棚结构图",
+					"to": "node_0024"
+				}
+			],
+			"autosave": true
+		},
+		{
+			"node_id": "node_0022",
+			"title": "控制室交接记录",
+			"icon_key": "document",
+			"node_type": "文本线索节点",
+			"location": "蓝室录音棚 / 控制室",
+			"time_label": "1999-02-18 00:05",
+			"characters": ["你"],
+			"body": [
+				"交接记录写得很规整，记录人将 23:30 到 00:10 标为设备静默巡检。",
+				"但其中一行被墨迹压得很重：A-17 备份卷曾在 23:52 自动启动。",
+				"如果记录属实，控制室在所谓静默巡检期间并不安静。"
+			],
+			"audio_clues": [],
+			"text_clues": ["clue_handover_log", "clue_a17_auto_start"],
+			"room_refs": ["handover_clipboard", "backup_rack"],
+			"choices": [
+				{
+					"title": "返回控制室复查",
+					"to": "node_0021"
+				},
+				{
+					"title": "调取备份录音 A-17",
+					"to": "node_0023"
+				},
+				{
+					"title": "核对结构图",
+					"to": "node_0024"
+				}
+			],
+			"autosave": true
+		},
+		{
+			"node_id": "node_0023",
+			"title": "备份录音 A-17",
+			"icon_key": "audio",
+			"node_type": "音频线索节点",
+			"location": "蓝室录音棚 / 控制室",
+			"time_label": "1999-02-18 00:12",
+			"characters": ["你", "未知脚步声"],
+			"body": [
+				"备份卷 A-17 的索引显示，它在案发前后自动写入了四十二秒环境声。",
+				"你暂时不分析声谱，只记录这段录音的存在，以及它与交接记录中的时间冲突。",
+				"这足以证明控制室备份系统在关键时间点曾被触发。"
+			],
+			"audio_clues": ["audio_backup_a17"],
+			"text_clues": ["clue_backup_reel_a17", "clue_a17_timestamp"],
+			"room_refs": ["backup_rack", "control_room_console"],
+			"choices": [
+				{
+					"title": "播放备份录音（占位）",
+					"action": "play_audio"
+				},
+				{
+					"title": "初判脚步声来源",
+					"to": "node_0026"
+				},
+				{
+					"title": "查看频谱占位分析",
+					"to": "node_0027"
+				}
+			],
+			"autosave": true
+		},
+		{
+			"node_id": "node_0024",
+			"title": "控制室与人声棚结构图",
+			"icon_key": "document",
+			"node_type": "调查节点",
+			"location": "蓝室录音棚 / 控制室墙面",
+			"time_label": "1999-02-18 00:18",
+			"characters": ["你"],
+			"body": [
+				"墙上的结构图标出控制室、人声棚和外侧通道的相对位置。",
+				"控制室与人声棚之间隔着双层观察窗，正常说话声不会直接穿透到备份麦克风。",
+				"但控制室门外侧通道距离备份机柜更近，脚步声可能从那里进入录音。"
+			],
+			"audio_clues": [],
+			"text_clues": ["clue_room_layout", "clue_double_window"],
+			"room_refs": ["control_room", "vocal_booth", "outer_corridor"],
+			"choices": [
+				{
+					"title": "检查人声棚地面材料",
+					"to": "node_0025"
+				},
+				{
+					"title": "检查控制室门缝",
+					"to": "node_0028"
+				}
+			],
+			"autosave": true
+		},
+		{
+			"node_id": "node_0025",
+			"title": "人声棚地面材料",
+			"icon_key": "investigation",
+			"node_type": "调查节点",
+			"location": "蓝室录音棚 / 人声棚",
+			"time_label": "1999-02-18 00:26",
+			"characters": ["你"],
+			"body": [
+				"人声棚铺着厚毯，脚踩上去几乎没有清晰的鞋跟声。",
+				"墙角的吸音棉保存完整，没有被人临时挪动的痕迹。",
+				"如果 A-17 中的脚步声十分短促且边缘清晰，它未必来自这间棚内。"
+			],
+			"audio_clues": [],
+			"text_clues": ["clue_vocal_booth_carpet", "clue_absorption_panel"],
+			"room_refs": ["vocal_booth_floor", "absorption_wall"],
+			"choices": [
+				{
+					"title": "进行脚步声来源初判",
+					"to": "node_0026"
+				},
+				{
+					"title": "认为死者在棚内踱步",
+					"to": "node_0032"
+				}
+			],
+			"autosave": true
+		},
+		{
+			"node_id": "node_0026",
+			"title": "脚步声来源初判",
+			"icon_key": "deduction",
+			"node_type": "推理节点",
+			"location": "蓝室录音棚 / 控制室",
+			"time_label": "1999-02-18 00:33",
+			"characters": ["你"],
+			"body": [
+				"你把交接记录、结构图和人声棚地面材料摆在同一张桌面上。",
+				"脚步声出现时，备份机柜附近的环境噪声没有明显遮蔽；若脚步来自人声棚，声音应该更闷。",
+				"初步判断需要继续比对控制室外侧通道与走廊回声。"
+			],
+			"audio_clues": ["audio_backup_a17"],
+			"text_clues": ["clue_source_first_judgment", "clue_vocal_booth_carpet"],
+			"room_refs": ["control_room_console", "outer_corridor"],
+			"choices": [
+				{
+					"title": "查看频谱占位分析",
+					"to": "node_0027"
+				},
+				{
+					"title": "比对走廊回声",
+					"to": "node_0029"
+				},
+				{
+					"title": "认为死者伪造录音",
+					"to": "node_0033"
+				}
+			],
+			"autosave": true
+		},
+		{
+			"node_id": "node_0027",
+			"title": "频谱占位分析",
+			"icon_key": "audio",
+			"node_type": "音频占位节点",
+			"location": "蓝室录音棚 / 控制室",
+			"time_label": "1999-02-18 00:39",
+			"characters": ["你"],
+			"body": [
+				"频谱分析工具尚未接入。你只记录人工听辨结果：脚步声短、硬、靠近控制室侧。",
+				"底噪中的空调低频持续稳定，说明录音不是被剪成多段后重新拼接。",
+				"这一步只作为第二阶段占位，不展示真实波形或频谱。"
+			],
+			"audio_clues": ["audio_backup_a17"],
+			"text_clues": ["clue_spectrum_placeholder", "clue_air_conditioner_noise"],
+			"room_refs": ["backup_rack"],
+			"choices": [
+				{
+					"title": "比对走廊回声",
+					"to": "node_0029"
+				},
+				{
+					"title": "继续推断脚步声位置",
+					"to": "node_0030"
+				}
+			],
+			"autosave": true
+		},
+		{
+			"node_id": "node_0028",
+			"title": "控制室门缝",
+			"icon_key": "investigation",
+			"node_type": "调查节点",
+			"location": "蓝室录音棚 / 控制室门口",
+			"time_label": "1999-02-18 00:44",
+			"characters": ["你"],
+			"body": [
+				"控制室门底的胶条老化，门缝能透进外侧通道的声响。",
+				"门外地面是硬质水磨石，鞋跟落地时会形成比人声棚更尖锐的瞬态声。",
+				"这让 A-17 中的脚步声有了另一个来源。"
+			],
+			"audio_clues": [],
+			"text_clues": ["clue_door_gap", "clue_hard_corridor_floor"],
+			"room_refs": ["control_room_door", "outer_corridor"],
+			"choices": [
+				{
+					"title": "查看控制室外侧通道",
+					"to": "node_0031"
+				},
+				{
+					"title": "比对走廊回声",
+					"to": "node_0029"
+				}
+			],
+			"autosave": true
+		},
+		{
+			"node_id": "node_0029",
+			"title": "走廊回声比对",
+			"icon_key": "audio",
+			"node_type": "音频占位节点",
+			"location": "蓝室录音棚 / 外侧走廊",
+			"time_label": "1999-02-18 00:51",
+			"characters": ["你"],
+			"body": [
+				"走廊回声比人声棚更亮，尾音贴近 A-17 中脚步声后的短促反射。",
+				"外侧通道和控制室门缝形成一条可能的传声路径。",
+				"你还不能锁定行走者身份，但可以排除一个关键误解。"
+			],
+			"audio_clues": ["audio_corridor_echo"],
+			"text_clues": ["clue_corridor_echo", "clue_door_gap"],
+			"room_refs": ["outer_corridor", "control_room_door"],
+			"choices": [
+				{
+					"title": "得出脚步声不在人声棚内",
+					"to": "node_0030"
+				},
+				{
+					"title": "查看控制室外侧通道",
+					"to": "node_0031"
+				}
+			],
+			"autosave": true
+		},
+		{
+			"node_id": "node_0030",
+			"title": "脚步声不在人声棚内",
+			"icon_key": "deduction",
+			"node_type": "推理节点",
+			"location": "蓝室录音棚 / 控制室",
+			"time_label": "1999-02-18 01:02",
+			"characters": ["你"],
+			"body": [
+				"你将 A-17 的脚步声、门缝、走廊回声和人声棚厚毯放在同一条链上。",
+				"最稳妥的结论是：20:16:42 的脚步声并不来自人声棚内部。",
+				"这不会立刻指出凶手，但会改变之后调查的方向。"
+			],
+			"audio_clues": ["audio_backup_a17", "audio_corridor_echo"],
+			"text_clues": ["clue_final_position_judgment"],
+			"room_refs": ["control_room", "vocal_booth", "outer_corridor"],
+			"choices": [
+				{
+					"title": "调查控制室外侧通道",
+					"to": "node_0031"
+				},
+				{
+					"title": "回到最近安全节点",
+					"action": "load_last_safe_autosave"
+				}
+			],
+			"autosave": true
+		},
+		{
+			"node_id": "node_0031",
+			"title": "控制室外侧通道",
+			"icon_key": "investigation",
+			"node_type": "调查节点",
+			"location": "蓝室录音棚 / 外侧通道",
+			"time_label": "1999-02-18 01:08",
+			"characters": ["你"],
+			"body": [
+				"外侧通道狭窄，只够一人贴墙通过。",
+				"门边的灰尘被蹭开一小段，位置正对控制室门缝。",
+				"如果有人在关键时间经过这里，备份录音会比棚内麦克风更容易捕捉到脚步。"
+			],
+			"audio_clues": [],
+			"text_clues": ["clue_outer_corridor_scuff", "clue_door_gap"],
+			"room_refs": ["outer_corridor", "control_room_door"],
+			"choices": [
+				{
+					"title": "回到脚步声结论",
+					"to": "node_0030"
+				},
+				{
+					"title": "仓促指控通道经过者",
+					"to": "node_0034"
+				}
+			],
+			"autosave": true
+		},
+		{
+			"node_id": "node_0032",
+			"title": "错误解释：棚内踱步",
+			"icon_key": "false",
+			"node_type": "错误解释节点",
+			"location": "蓝室录音棚 / 人声棚",
+			"time_label": "1999-02-18 01:14",
+			"characters": ["你"],
+			"body": [
+				"你试图把脚步声解释为死者在棚内踱步。",
+				"但厚毯和吸音墙让这个解释无法说明录音里清晰的硬质落点。",
+				"这个方向暂时不能支撑后续判断。"
+			],
+			"audio_clues": ["audio_backup_a17"],
+			"text_clues": ["clue_vocal_booth_carpet"],
+			"room_refs": ["vocal_booth_floor"],
+			"choices": [
+				{
+					"title": "回到最近安全节点",
+					"action": "load_last_safe_autosave"
+				},
+				{
+					"title": "重新进行脚步声来源初判",
+					"to": "node_0026"
+				}
+			],
+			"autosave": true
+		},
+		{
+			"node_id": "node_0033",
+			"title": "错误解释：死者伪造录音",
+			"icon_key": "false",
+			"node_type": "错误解释节点",
+			"location": "蓝室录音棚 / 控制室",
+			"time_label": "1999-02-18 01:20",
+			"characters": ["你"],
+			"body": [
+				"你提出死者提前伪造备份录音的可能。",
+				"但 A-17 自动启动记录与空调底噪连续性不支持这个解释。",
+				"它能作为怀疑，却不能作为当前结论。"
+			],
+			"audio_clues": ["audio_backup_a17"],
+			"text_clues": ["clue_a17_auto_start", "clue_air_conditioner_noise"],
+			"room_refs": ["backup_rack", "control_room_console"],
+			"choices": [
+				{
+					"title": "回到最近安全节点",
+					"action": "load_last_safe_autosave"
+				},
+				{
+					"title": "查看频谱占位分析",
+					"to": "node_0027"
+				}
+			],
+			"autosave": true
+		},
+		{
+			"node_id": "node_0034",
+			"title": "失败结局：仓促指控",
+			"icon_key": "fatal",
+			"node_type": "失败结局",
+			"location": "蓝室录音棚 / 外侧通道",
+			"time_label": "1999-02-18 01:28",
+			"characters": ["你", "被指控者"],
+			"body": [
+				"你在没有锁定身份、时间线和进入权限前仓促提出指控。",
+				"对方用交接记录中的空白时间反问，你无法解释完整路径。",
+				"这条推理链断在了最后一步。"
+			],
+			"audio_clues": [],
+			"text_clues": ["clue_outer_corridor_scuff"],
+			"room_refs": ["outer_corridor"],
+			"choices": [
+				{
+					"title": "回到最近安全节点",
+					"action": "load_last_safe_autosave"
+				}
+			],
+			"autosave": false
+		}
+	]
+}

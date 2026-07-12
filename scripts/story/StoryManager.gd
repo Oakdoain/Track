@@ -2,20 +2,28 @@ extends Node
 
 var story_data: Dictionary = {}
 var clue_data: Dictionary = {}
+var audio_clue_data: Dictionary = {}
 
 var current_node_id: String = ""
 var read_node_ids: Dictionary = {}
 var discovered_keywords: Dictionary = {}
 var discovered_clues: Dictionary = {}
+var discovered_audio_ids: Dictionary = {}
+var listened_audio_ids: Dictionary = {}
 
 
 const DEFAULT_STORY_PATH := "res://data/story/chapter_01.json"
 const DEFAULT_CLUES_PATH := "res://data/clues/clues.json"
+const DEFAULT_AUDIO_CLUES_PATH := "res://data/audio/audio_clues.json"
+const SAVE_DIR := "user://saves"
+const AUTO_SAVE_PATH := "user://saves/save_00.json"
+const AUTO_SAVE_SLOT := 0
 
 
 func load_story(story_path: String, clues_path: String) -> bool:
 	story_data = _read_json(story_path)
 	clue_data = _read_json(clues_path)
+	audio_clue_data = _read_json(DEFAULT_AUDIO_CLUES_PATH)
 
 	if story_data.is_empty():
 		push_error("StoryManager: story json is empty or invalid: " + story_path)
@@ -35,6 +43,8 @@ func load_story(story_path: String, clues_path: String) -> bool:
 	read_node_ids.clear()
 	discovered_keywords.clear()
 	discovered_clues.clear()
+	discovered_audio_ids.clear()
+	listened_audio_ids.clear()
 
 	_apply_node_discovery(current_node_id)
 
@@ -134,6 +144,7 @@ func get_render_data() -> Dictionary:
 
 		"current_summary": summary,
 		"clues": _resolve_node_clues(node),
+		"related_audio_clues": _resolve_node_audio_clues(node),
 		"graph": graph,
 		"attrs": attrs
 	}
@@ -173,12 +184,82 @@ func goto_node(node_id: String) -> bool:
 
 	current_node_id = node_id
 	_apply_node_discovery(current_node_id)
+	write_auto_save()
 
 	return true
 
 
 func get_current_node_id() -> String:
 	return current_node_id
+
+
+func mark_audio_listened(audio_id: String) -> void:
+	if audio_id == "":
+		return
+
+	discovered_audio_ids[audio_id] = true
+	listened_audio_ids[audio_id] = true
+	write_auto_save()
+
+
+func make_save_data(slot: int, save_name: String, is_auto: bool) -> Dictionary:
+	var render_data: Dictionary = get_render_data()
+	var read_nodes_text: String = str(render_data.get("read_nodes", "0 / 0"))
+	var progress_text: String = str(render_data.get("chapter_explore", "0%"))
+	var title: String = str(render_data.get("title", "当前节点"))
+	var chapter: String = str(render_data.get("chapter", "第一章"))
+	var now_unix: int = int(Time.get_unix_time_from_system())
+
+	return {
+		"slot": AUTO_SAVE_SLOT if is_auto else slot,
+		"is_auto": is_auto,
+		"is_empty": false,
+		"name": "自动存档" if is_auto else save_name,
+		"chapter_line": "%s · %s" % [
+			chapter,
+			_get_current_time_option(render_data)
+		],
+		"chapter_progress": "%s %s 节点" % [
+			chapter,
+			read_nodes_text
+		],
+		"game_progress": progress_text,
+		"save_time": _current_time_string(),
+		"save_unix": now_unix,
+		"current_node_id": current_node_id,
+		"current_title": title,
+		"state": {
+			"read_node_ids": read_node_ids.keys(),
+			"discovered_keywords": discovered_keywords.keys(),
+			"discovered_clues": discovered_clues.keys(),
+			"discovered_audio_ids": discovered_audio_ids.keys(),
+			"listened_audio_ids": listened_audio_ids.keys()
+		},
+		"note": "自动存档" if is_auto else "手动档位"
+	}
+
+
+func write_auto_save() -> bool:
+	if current_node_id == "" or not has_story_loaded():
+		return false
+
+	_ensure_save_dir()
+
+	var data: Dictionary = make_save_data(AUTO_SAVE_SLOT, "自动存档", true)
+	var file: FileAccess = FileAccess.open(AUTO_SAVE_PATH, FileAccess.WRITE)
+
+	if file == null:
+		push_warning("StoryManager: unable to write auto save: " + AUTO_SAVE_PATH)
+		return false
+
+	file.store_string(JSON.stringify(data, "\t"))
+	file.close()
+
+	return true
+
+
+func auto_save() -> bool:
+	return write_auto_save()
 
 
 func restore_from_save(save_data: Dictionary) -> bool:
@@ -207,11 +288,47 @@ func restore_from_save(save_data: Dictionary) -> bool:
 	_restore_string_set(read_node_ids, state.get("read_node_ids", []))
 	_restore_string_set(discovered_keywords, state.get("discovered_keywords", []))
 	_restore_string_set(discovered_clues, state.get("discovered_clues", []))
+	_restore_string_set(discovered_audio_ids, state.get("discovered_audio_ids", []))
+	_restore_string_set(listened_audio_ids, state.get("listened_audio_ids", []))
 
 	current_node_id = saved_node_id
 	_apply_node_discovery(current_node_id)
 
 	return true
+
+
+func _get_current_time_option(render_data: Dictionary) -> String:
+	var time_options: Variant = render_data.get("time_options", [])
+	var time_index: int = int(render_data.get("time_index", 0))
+
+	if time_options is Array and time_options.size() > 0:
+		time_index = int(clamp(time_index, 0, time_options.size() - 1))
+		return str(time_options[time_index])
+
+	return "第一天 · 夜晚"
+
+
+func _current_time_string() -> String:
+	var time_data: Dictionary = Time.get_datetime_dict_from_system()
+
+	return "%04d / %02d / %02d\n%02d:%02d:%02d" % [
+		int(time_data["year"]),
+		int(time_data["month"]),
+		int(time_data["day"]),
+		int(time_data["hour"]),
+		int(time_data["minute"]),
+		int(time_data["second"])
+	]
+
+
+func _ensure_save_dir() -> void:
+	var user_dir: DirAccess = DirAccess.open("user://")
+
+	if user_dir == null:
+		return
+
+	if not user_dir.dir_exists("saves"):
+		user_dir.make_dir("saves")
 
 
 func _restore_string_set(target: Dictionary, raw_values: Variant) -> void:
@@ -254,6 +371,24 @@ func _apply_node_discovery(node_id: String) -> void:
 		for clue_id in clues:
 			discovered_clues[str(clue_id)] = true
 
+	var audio_clues: Variant = node.get("audio_clues", [])
+
+	if audio_clues is Array:
+		for audio_id in audio_clues:
+			discovered_audio_ids[str(audio_id)] = true
+
+	for audio_clue in _get_all_audio_clues():
+		if not (audio_clue is Dictionary):
+			continue
+
+		if str(audio_clue.get("unlock_node", "")) != node_id:
+			continue
+
+		var unlocked_audio_id: String = str(audio_clue.get("id", ""))
+
+		if unlocked_audio_id != "":
+			discovered_audio_ids[unlocked_audio_id] = true
+
 
 func _resolve_node_clues(node: Dictionary) -> Array:
 	var result: Array = []
@@ -279,6 +414,64 @@ func _resolve_node_clues(node: Dictionary) -> Array:
 			})
 
 	return result
+
+
+func _resolve_node_audio_clues(node: Dictionary) -> Array:
+	var result: Array = []
+	var audio_ids: Array = []
+	var raw_audio_ids: Variant = node.get("audio_clues", [])
+
+	if raw_audio_ids is Array:
+		for raw_audio_id in raw_audio_ids:
+			var audio_id: String = str(raw_audio_id)
+
+			if audio_id != "" and not audio_ids.has(audio_id):
+				audio_ids.append(audio_id)
+
+	for audio_clue in _get_all_audio_clues():
+		if not (audio_clue is Dictionary):
+			continue
+
+		var audio_id: String = str(audio_clue.get("id", ""))
+
+		if audio_id == "":
+			continue
+
+		if str(audio_clue.get("unlock_node", "")) == current_node_id and not audio_ids.has(audio_id):
+			audio_ids.append(audio_id)
+
+	for audio_id in audio_ids:
+		var audio_clue: Dictionary = _get_audio_clue(audio_id)
+
+		if audio_clue.is_empty():
+			continue
+
+		var item: Dictionary = audio_clue.duplicate(true)
+		item["discovered"] = discovered_audio_ids.has(audio_id)
+		item["listened"] = listened_audio_ids.has(audio_id)
+		result.append(item)
+
+	return result
+
+
+func _get_audio_clue(audio_id: String) -> Dictionary:
+	for audio_clue in _get_all_audio_clues():
+		if not (audio_clue is Dictionary):
+			continue
+
+		if str(audio_clue.get("id", "")) == audio_id:
+			return audio_clue
+
+	return {}
+
+
+func _get_all_audio_clues() -> Array:
+	var raw_audio_clues: Variant = audio_clue_data.get("audio_clues", [])
+
+	if raw_audio_clues is Array:
+		return raw_audio_clues
+
+	return []
 
 
 func _normalize_graph(raw_graph: Variant) -> Dictionary:
@@ -407,7 +600,7 @@ func _read_json(path: String) -> Dictionary:
 		])
 		return {}
 
-	var data = json.data
+	var data: Variant = json.data
 
 	if data is Dictionary:
 		return data

@@ -45,6 +45,7 @@ const C_DIVIDER := Color("#D7DEF3")
 const C_SUBTEXT := Color("#5B6684")
 const C_MUTED := Color("#8995B8")
 const C_WHITE := Color("#FFFFFF")
+const C_OVERLAY := Color(0.03, 0.06, 0.15, 0.42)
 
 const FONT_PUBLIC_REGULAR := preload("res://assets/fonts/PublicSans-Regular.ttf")
 const FONT_MONO_REGULAR := preload("res://assets/fonts/IBMPlexMono-Regular.ttf")
@@ -75,6 +76,7 @@ var _last_viewport_size: Vector2 = Vector2.ZERO
 
 var bg: ColorRect
 var root: Control
+var confirm_layer: Control
 
 var save_slots: Array = []
 var selected_save_index: int = 0
@@ -144,6 +146,9 @@ func _force_self_to_viewport() -> void:
 	if root != null:
 		_fill_rect(root)
 
+	if confirm_layer != null:
+		_fill_rect(confirm_layer)
+
 
 func _build_ui() -> void:
 	bg = ColorRect.new()
@@ -172,6 +177,13 @@ func _build_ui() -> void:
 	var center_panel: Control = _build_center_panel()
 	root.add_child(center_panel)
 	_dock_center(center_panel, LEFT_PANEL_WIDTH, RIGHT_PANEL_WIDTH, TOP_BAR_HEIGHT)
+
+	confirm_layer = Control.new()
+	confirm_layer.name = "ConfirmLayer"
+	confirm_layer.visible = false
+	confirm_layer.mouse_filter = Control.MOUSE_FILTER_STOP
+	_fill_rect(confirm_layer)
+	root.add_child(confirm_layer)
 
 
 func _build_topbar() -> Control:
@@ -217,8 +229,8 @@ func _build_topbar() -> Control:
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(spacer)
 
-	row.add_child(_nav_button(ICON_STEP_BACK, "回溯", false, "res://scenes/ui/MainUI.tscn"))
-	row.add_child(_nav_button(ICON_BOOK_OPEN, "剧情", false, "res://scenes/ui/MainUI.tscn"))
+	row.add_child(_nav_button(ICON_STEP_BACK, "回溯", false, MAIN_UI_SCENE))
+	row.add_child(_nav_button(ICON_BOOK_OPEN, "剧情", false, MAIN_UI_SCENE))
 	row.add_child(_nav_button(ICON_GIT_BRANCH, "图谱", false))
 	row.add_child(_nav_button(ICON_SAVE, "存档", true))
 	row.add_child(_nav_button(ICON_FOLDER_OPEN, "读取", false))
@@ -429,13 +441,13 @@ func _build_right_panel() -> Control:
 	panel.add_child(margin)
 
 	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 20)
+	box.add_theme_constant_override("separation", 18)
 	margin.add_child(box)
 
 	box.add_child(_section_title("存档说明"))
 
 	var info_card := PanelContainer.new()
-	info_card.custom_minimum_size.y = 230
+	info_card.custom_minimum_size.y = 214
 	info_card.add_theme_stylebox_override("panel", _style_box(Color.TRANSPARENT, C_BLUE, 1, 4))
 	box.add_child(info_card)
 
@@ -469,7 +481,7 @@ func _build_right_panel() -> Control:
 	info_box.add_child(_thin_line())
 
 	var rules := _label(
-		"• 每页显示 7 个条目。\n• 手动档位固定为 1 到 20。\n• 空档位可直接写入。\n• 自动存档不可清空，不可手动覆盖。",
+		"• 每页显示 7 个条目。\n• 空档位可直接写入。\n• 自动存档不可清空，不可手动覆盖。",
 		14,
 		C_BLUE,
 		FONT_SERIF_REGULAR
@@ -531,7 +543,7 @@ func _build_right_panel() -> Control:
 	overwrite.pressed.connect(_overwrite_selected_save)
 	box.add_child(overwrite)
 
-	var load_button := _large_action_button(ICON_FOLDER_OPEN, "读取当前档位", false)
+	var load_button := _large_action_button(ICON_FOLDER_OPEN, "读取此档位", false)
 	load_button.pressed.connect(_load_selected_save)
 	box.add_child(load_button)
 
@@ -829,6 +841,8 @@ func _load_save_slots() -> void:
 							data["slot"] = AUTO_SAVE_SLOT
 							data["is_auto"] = true
 							data["is_empty"] = false
+							data["name"] = "自动存档"
+							data["note"] = str(data.get("note", "自动存档"))
 							auto_data = data
 						elif slot >= 1 and slot <= MANUAL_SLOT_COUNT:
 							data["slot"] = slot
@@ -876,13 +890,19 @@ func _make_empty_slot_data(slot: int) -> Dictionary:
 
 
 func _make_auto_save_data() -> Dictionary:
-	var render_data: Dictionary = {}
-	var current_node_id := ""
-
 	var manager: Node = get_node_or_null("/root/StoryManager")
 
 	if manager != null and manager.has_method("ensure_story_loaded"):
 		manager.call("ensure_story_loaded")
+
+	if manager != null and manager.has_method("make_save_data"):
+		var save_data_variant: Variant = manager.call("make_save_data", AUTO_SAVE_SLOT, "自动存档", true)
+
+		if save_data_variant is Dictionary:
+			return save_data_variant
+
+	var render_data: Dictionary = {}
+	var current_node_id := ""
 
 	if manager != null and manager.has_method("get_render_data"):
 		var raw_render: Variant = manager.call("get_render_data")
@@ -916,7 +936,11 @@ func _make_auto_save_data() -> Dictionary:
 		"save_unix": now_unix,
 		"current_node_id": current_node_id,
 		"current_title": title,
-		"state": _get_story_state_from_manager(manager),
+		"state": {
+			"read_node_ids": [],
+			"discovered_keywords": [],
+			"discovered_clues": []
+		},
 		"note": "自动存档"
 	}
 
@@ -971,7 +995,75 @@ func _overwrite_selected_save() -> void:
 		push_warning("SaveUI: 自动存档不可手动覆盖。")
 		return
 
+	var slot: int = int(data.get("slot", selected_save_index))
+	var is_empty: bool = bool(data.get("is_empty", false))
+
+	var title: String = "写入档位" if is_empty else "覆盖档位"
+	var message: String = "确认将当前剧情进度写入 %02d 档？" % slot
+
+	if not is_empty:
+		message = "当前 %02d 档已有存档。\n确认用当前剧情进度覆盖此档位？" % slot
+
+	_show_confirm_dialog(title, message, "确认写入", Callable(self, "_overwrite_selected_save_confirmed"))
+
+
+func _overwrite_selected_save_confirmed() -> void:
 	_write_runtime_data_to_index(selected_save_index)
+
+
+func _load_selected_save() -> void:
+	if save_slots.is_empty() or selected_save_index < 0:
+		return
+
+	var data_variant: Variant = save_slots[selected_save_index]
+
+	if not (data_variant is Dictionary):
+		return
+
+	var data: Dictionary = data_variant
+
+	if bool(data.get("is_empty", false)):
+		push_warning("SaveUI: 空档位不可读取。")
+		return
+
+	var slot_text: String = "自动存档" if bool(data.get("is_auto", false)) else "%02d 档" % int(data.get("slot", selected_save_index))
+	var message := "读取 %s 后，当前未保存的进度可能会丢失。\n确认读取此档位并返回剧情页？" % slot_text
+
+	_show_confirm_dialog("读取档位", message, "确认读取", Callable(self, "_load_selected_save_confirmed"))
+
+
+func _load_selected_save_confirmed() -> void:
+	if save_slots.is_empty() or selected_save_index < 0:
+		return
+
+	var data_variant: Variant = save_slots[selected_save_index]
+
+	if not (data_variant is Dictionary):
+		return
+
+	var data: Dictionary = data_variant
+
+	if bool(data.get("is_empty", false)):
+		return
+
+	var manager: Node = get_node_or_null("/root/StoryManager")
+
+	if manager == null:
+		push_warning("SaveUI: 未找到 StoryManager。")
+		return
+
+	if not manager.has_method("restore_from_save"):
+		push_warning("SaveUI: StoryManager 缺少 restore_from_save。")
+		return
+
+	var result_variant: Variant = manager.call("restore_from_save", data)
+	var restored: bool = bool(result_variant)
+
+	if not restored:
+		push_warning("SaveUI: 读取档位失败。")
+		return
+
+	_change_scene_if_exists(MAIN_UI_SCENE)
 
 
 func _write_runtime_data_to_index(index: int) -> void:
@@ -1011,11 +1103,30 @@ func _clear_selected_slot() -> void:
 		push_warning("SaveUI: 自动存档不可清空。")
 		return
 
-	var slot: int = int(data.get("slot", selected_save_index))
-
 	if bool(data.get("is_empty", false)):
 		return
 
+	var slot: int = int(data.get("slot", selected_save_index))
+	var message := "确认清空 %02d 档？\n此操作会删除该档位的存档文件。" % slot
+
+	_show_confirm_dialog("清空档位", message, "确认清空", Callable(self, "_clear_selected_slot_confirmed"))
+
+
+func _clear_selected_slot_confirmed() -> void:
+	if save_slots.is_empty() or selected_save_index < 0:
+		return
+
+	var data_variant: Variant = save_slots[selected_save_index]
+
+	if not (data_variant is Dictionary):
+		return
+
+	var data: Dictionary = data_variant
+
+	if bool(data.get("is_auto", false)) or bool(data.get("is_empty", false)):
+		return
+
+	var slot: int = int(data.get("slot", selected_save_index))
 	var file_name: String = "save_%02d.json" % slot
 	var dir: DirAccess = DirAccess.open(SAVE_DIR)
 
@@ -1072,36 +1183,6 @@ func _backup_selected_save() -> void:
 	_write_json(SAVE_DIR + "/backup_%02d.json" % slot, backup_data)
 
 
-func _load_selected_save() -> void:
-	if save_slots.is_empty() or selected_save_index < 0 or selected_save_index >= save_slots.size():
-		return
-
-	var data_variant: Variant = save_slots[selected_save_index]
-
-	if not (data_variant is Dictionary):
-		return
-
-	var data: Dictionary = data_variant
-
-	if bool(data.get("is_empty", false)):
-		push_warning("SaveUI: 空档位不可读取。")
-		return
-
-	var manager: Node = get_node_or_null("/root/StoryManager")
-
-	if manager == null or not manager.has_method("restore_from_save"):
-		push_warning("SaveUI: StoryManager.restore_from_save 不可用。")
-		return
-
-	var restored: Variant = manager.call("restore_from_save", data)
-
-	if not bool(restored):
-		push_warning("SaveUI: 读取当前档位失败。")
-		return
-
-	_change_scene_if_exists(MAIN_UI_SCENE)
-
-
 func _find_first_empty_manual_slot_index() -> int:
 	for i in range(1, save_slots.size()):
 		var data_variant: Variant = save_slots[i]
@@ -1116,13 +1197,19 @@ func _find_first_empty_manual_slot_index() -> int:
 
 
 func _make_runtime_save_data(slot: int, save_name: String) -> Dictionary:
-	var render_data: Dictionary = {}
-	var current_node_id := ""
-
 	var manager: Node = get_node_or_null("/root/StoryManager")
 
 	if manager != null and manager.has_method("ensure_story_loaded"):
 		manager.call("ensure_story_loaded")
+
+	if manager != null and manager.has_method("make_save_data"):
+		var result_variant: Variant = manager.call("make_save_data", slot, save_name, false)
+
+		if result_variant is Dictionary:
+			return result_variant
+
+	var render_data: Dictionary = {}
+	var current_node_id := ""
 
 	if manager != null and manager.has_method("get_render_data"):
 		var raw_render: Variant = manager.call("get_render_data")
@@ -1132,6 +1219,24 @@ func _make_runtime_save_data(slot: int, save_name: String) -> Dictionary:
 
 	if manager != null and manager.has_method("get_current_node_id"):
 		current_node_id = str(manager.call("get_current_node_id"))
+
+	var read_nodes: Array = []
+	var keywords: Array = []
+	var clues: Array = []
+
+	if manager != null:
+		var raw_read: Variant = manager.get("read_node_ids")
+		var raw_keywords: Variant = manager.get("discovered_keywords")
+		var raw_clues: Variant = manager.get("discovered_clues")
+
+		if raw_read is Dictionary:
+			read_nodes = raw_read.keys()
+
+		if raw_keywords is Dictionary:
+			keywords = raw_keywords.keys()
+
+		if raw_clues is Dictionary:
+			clues = raw_clues.keys()
 
 	var read_nodes_text: String = str(render_data.get("read_nodes", "0 / 0"))
 	var progress_text: String = str(render_data.get("chapter_explore", "0%"))
@@ -1156,34 +1261,12 @@ func _make_runtime_save_data(slot: int, save_name: String) -> Dictionary:
 		"save_unix": now_unix,
 		"current_node_id": current_node_id,
 		"current_title": title,
-		"state": _get_story_state_from_manager(manager),
+		"state": {
+			"read_node_ids": read_nodes,
+			"discovered_keywords": keywords,
+			"discovered_clues": clues
+		},
 		"note": "手动档位"
-	}
-
-
-func _get_story_state_from_manager(manager: Node) -> Dictionary:
-	var read_nodes: Array = []
-	var keywords: Array = []
-	var clues: Array = []
-
-	if manager != null:
-		var raw_read: Variant = manager.get("read_node_ids")
-		var raw_keywords: Variant = manager.get("discovered_keywords")
-		var raw_clues: Variant = manager.get("discovered_clues")
-
-		if raw_read is Dictionary:
-			read_nodes = raw_read.keys()
-
-		if raw_keywords is Dictionary:
-			keywords = raw_keywords.keys()
-
-		if raw_clues is Dictionary:
-			clues = raw_clues.keys()
-
-	return {
-		"read_node_ids": read_nodes,
-		"discovered_keywords": keywords,
-		"discovered_clues": clues
 	}
 
 
@@ -1196,6 +1279,106 @@ func _get_current_time_option(render_data: Dictionary) -> String:
 		return str(time_options[time_index])
 
 	return "第一天 · 夜晚"
+
+
+func _show_confirm_dialog(title: String, message: String, confirm_text: String, callback: Callable) -> void:
+	if confirm_layer == null:
+		return
+
+	_clear_children(confirm_layer)
+	confirm_layer.visible = true
+
+	var overlay := ColorRect.new()
+	overlay.color = C_OVERLAY
+	_fill_rect(overlay)
+	confirm_layer.add_child(overlay)
+
+	var center := CenterContainer.new()
+	_fill_rect(center)
+	confirm_layer.add_child(center)
+
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(540, 276)
+	panel.add_theme_stylebox_override("panel", _style_box(C_BG, C_BLUE, 1, 6))
+	center.add_child(panel)
+
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 28)
+	margin.add_theme_constant_override("margin_right", 28)
+	margin.add_theme_constant_override("margin_top", 24)
+	margin.add_theme_constant_override("margin_bottom", 22)
+	panel.add_child(margin)
+
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 16)
+	margin.add_child(box)
+
+	var title_label := _label(title, 22, C_BLUE, FONT_SERIF_SEMIBOLD)
+	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	box.add_child(title_label)
+
+	var line := _thin_line()
+	box.add_child(line)
+
+	var message_label := _label(message, 15, C_BLUE, FONT_SERIF_REGULAR)
+	message_label.custom_minimum_size.y = 82
+	message_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	message_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	box.add_child(message_label)
+
+	var spacer := Control.new()
+	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	box.add_child(spacer)
+
+	var button_row := HBoxContainer.new()
+	button_row.alignment = BoxContainer.ALIGNMENT_END
+	button_row.add_theme_constant_override("separation", 12)
+	box.add_child(button_row)
+
+	var cancel_button := _dialog_button("取消", false)
+	cancel_button.pressed.connect(_hide_confirm_dialog)
+	button_row.add_child(cancel_button)
+
+	var confirm_button := _dialog_button(confirm_text, true)
+	confirm_button.pressed.connect(func():
+		_hide_confirm_dialog()
+
+		if callback.is_valid():
+			callback.call()
+	)
+	button_row.add_child(confirm_button)
+
+
+func _hide_confirm_dialog() -> void:
+	if confirm_layer == null:
+		return
+
+	confirm_layer.visible = false
+	_clear_children(confirm_layer)
+
+
+func _dialog_button(text: String, active: bool) -> Button:
+	var button := Button.new()
+	button.custom_minimum_size = Vector2(118, 42)
+	button.focus_mode = Control.FOCUS_NONE
+	button.text = text
+
+	button.add_theme_font_override("font", FONT_SERIF_SEMIBOLD)
+	button.add_theme_font_size_override("font_size", 15)
+	button.add_theme_color_override("font_color", C_WHITE if active else C_BLUE)
+	button.add_theme_color_override("font_hover_color", C_WHITE if active else C_BLUE)
+	button.add_theme_color_override("font_pressed_color", C_WHITE)
+
+	if active:
+		button.add_theme_stylebox_override("normal", _style_box(C_BLUE_ACTIVE, C_BLUE_ACTIVE, 1, 4))
+		button.add_theme_stylebox_override("hover", _style_box(C_BLUE_DARK, C_BLUE_DARK, 1, 4))
+		button.add_theme_stylebox_override("pressed", _style_box(C_BLUE_DARK, C_BLUE_DARK, 1, 4))
+	else:
+		button.add_theme_stylebox_override("normal", _style_box(Color.TRANSPARENT, C_LINE, 1, 4))
+		button.add_theme_stylebox_override("hover", _style_box(C_PANEL_SOFT, C_BLUE, 1, 4))
+		button.add_theme_stylebox_override("pressed", _style_box(C_BLUE, C_BLUE, 1, 4))
+
+	return button
 
 
 func _ensure_save_dir() -> void:
@@ -1236,7 +1419,7 @@ func _read_json(path: String) -> Dictionary:
 
 	var content: String = FileAccess.get_file_as_string(path)
 	var json := JSON.new()
-	var error: Error = json.parse(content)
+	var error: int = json.parse(content)
 
 	if error != OK:
 		push_warning("SaveUI: JSON 解析失败：" + path)
@@ -1621,7 +1804,7 @@ func _dock_center(control: Control, left: int, right: int, top: int) -> void:
 
 func _change_scene_if_exists(scene_path: String) -> void:
 	if not ResourceLoader.exists(scene_path):
-		push_warning("SaveUI: scene not found: " + scene_path)
+		push_warning("SaveUI: 场景不存在：" + scene_path)
 		return
 
 	get_tree().change_scene_to_file(scene_path)
