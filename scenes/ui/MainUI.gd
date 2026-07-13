@@ -1,5 +1,7 @@
 extends Control
 
+const AudioWaveformPlaceholder := preload("res://scripts/case/AudioWaveformPlaceholder.gd")
+
 const MIN_WINDOW_SIZE := Vector2i(1280, 720)
 
 const TOP_BAR_HEIGHT := 72
@@ -8,6 +10,7 @@ const LEFT_PANEL_WIDTH := 400
 const RIGHT_PANEL_WIDTH := 400
 
 const STORY_CONTENT_WIDTH := 920
+const IMAGE_CARD_HEIGHT := 540
 
 const TOP_BAR_MARGIN_LEFT := 24
 const TOP_BAR_MARGIN_RIGHT := 24
@@ -66,19 +69,21 @@ var chapter_small_label: Label
 var chapter_dropdown: OptionButton
 var chapter_intro_label: Label
 
+var loader: CaseDataLoader
+var runtime_state: CaseRuntimeState
+
 var target_text_label: Label
 var keyword_grid: GridContainer
-var keyword_count_label: Label
-var progress_percent_label: Label
-var progress_bar: ProgressBar
-var read_nodes_value_label: Label
-var chapter_explore_value_label: Label
 
 var node_type_label: PanelContainer
 var story_title_label: Label
 var story_scroll: ScrollContainer
+var audio_slot: VBoxContainer
+var image_slot: VBoxContainer
 var story_body_label: RichTextLabel
+var quote_panel: PanelContainer
 var quote_label: Label
+var choice_title_label: Label
 var choice_list: VBoxContainer
 
 var current_node_title: Label
@@ -87,16 +92,20 @@ var clue_list: VBoxContainer
 var graph_slot: VBoxContainer
 
 var attr_type_value: Label
-var attr_condition_value: Label
+var attr_location_value: Label
 var attr_character_value: Label
-var attr_reward_value: Label
+var attr_autosave_value: Label
 
 
 func _ready() -> void:
 	_setup_window()
 	_force_self_to_viewport()
+
+	loader = CaseDataLoader.new()
+	runtime_state = CaseRuntimeState.new()
+
 	_build_ui()
-	_load_demo_node()
+	_load_case()
 	call_deferred("_force_self_to_viewport")
 	call_deferred("_apply_story_scrollbar_style")
 
@@ -292,33 +301,6 @@ func _build_left_panel() -> Control:
 	keyword_grid.add_theme_constant_override("v_separation", 8)
 	box.add_child(keyword_grid)
 
-	keyword_count_label = _label("", 14, C_BLUE, FONT_MONO_REGULAR)
-	box.add_child(keyword_count_label)
-
-	box.add_child(_left_divider())
-	box.add_child(_section_title("阅读进度"))
-
-	progress_percent_label = _label("", 31, C_BLUE, FONT_SERIF_REGULAR)
-	box.add_child(progress_percent_label)
-
-	progress_bar = ProgressBar.new()
-	progress_bar.custom_minimum_size = Vector2(300, 6)
-	progress_bar.max_value = 100
-	progress_bar.show_percentage = false
-	progress_bar.add_theme_stylebox_override("background", _style_box(Color("#E4E9F6"), Color.TRANSPARENT, 0, 3))
-	progress_bar.add_theme_stylebox_override("fill", _style_box(C_BLUE, Color.TRANSPARENT, 0, 3))
-	box.add_child(progress_bar)
-
-	box.add_child(_stat_row_with_ref("已阅读节点", "read_nodes"))
-	box.add_child(_stat_row_with_ref("本章探索度", "chapter_explore"))
-
-	var spacer := Control.new()
-	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	box.add_child(spacer)
-
-	var link := _label("查看章节进度 →", 14, C_BLUE, FONT_SERIF_REGULAR)
-	link.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	box.add_child(link)
 
 	return panel
 
@@ -328,23 +310,30 @@ func _build_center_panel() -> Control:
 	panel.name = "CenterPanel"
 	panel.add_theme_stylebox_override("panel", _style_box(C_BG, Color.TRANSPARENT, 0, 0))
 
-	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", CENTER_MARGIN_LEFT)
-	margin.add_theme_constant_override("margin_right", CENTER_MARGIN_RIGHT)
-	margin.add_theme_constant_override("margin_top", CENTER_MARGIN_TOP)
-	margin.add_theme_constant_override("margin_bottom", CENTER_MARGIN_BOTTOM)
-	panel.add_child(margin)
-
+	# ScrollContainer 直接占满中央区域。
+	# 这样垂直滚动条会贴在中央区域最右边，而不是被正文边距推向内部。
 	story_scroll = ScrollContainer.new()
+	story_scroll.name = "StoryScroll"
 	story_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	story_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	story_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	story_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	margin.add_child(story_scroll)
+	panel.add_child(story_scroll)
+
+	# 正文边距放到 ScrollContainer 内部。
+	# 内容仍保留原来的左右、上下留白，但不会影响滚动条位置。
+	var margin := MarginContainer.new()
+	margin.name = "StoryScrollMargin"
+	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	margin.add_theme_constant_override("margin_left", CENTER_MARGIN_LEFT)
+	margin.add_theme_constant_override("margin_right", CENTER_MARGIN_RIGHT)
+	margin.add_theme_constant_override("margin_top", CENTER_MARGIN_TOP)
+	margin.add_theme_constant_override("margin_bottom", CENTER_MARGIN_BOTTOM)
+	story_scroll.add_child(margin)
 
 	var story_center := CenterContainer.new()
 	story_center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	story_scroll.add_child(story_center)
+	margin.add_child(story_center)
 
 	var outer := VBoxContainer.new()
 	outer.custom_minimum_size.x = STORY_CONTENT_WIDTH
@@ -367,6 +356,14 @@ func _build_center_panel() -> Control:
 	ornament.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	outer.add_child(ornament)
 
+	audio_slot = VBoxContainer.new()
+	audio_slot.add_theme_constant_override("separation", 12)
+	outer.add_child(audio_slot)
+
+	image_slot = VBoxContainer.new()
+	image_slot.add_theme_constant_override("separation", 12)
+	outer.add_child(image_slot)
+
 	story_body_label = RichTextLabel.new()
 	story_body_label.custom_minimum_size = Vector2(STORY_CONTENT_WIDTH, 0)
 	story_body_label.fit_content = true
@@ -380,9 +377,10 @@ func _build_center_panel() -> Control:
 	story_body_label.add_theme_constant_override("line_separation", 4)
 	outer.add_child(story_body_label)
 
-	var quote_panel := PanelContainer.new()
+	quote_panel = PanelContainer.new()
 	quote_panel.custom_minimum_size = Vector2(STORY_CONTENT_WIDTH, 58)
 	quote_panel.add_theme_stylebox_override("panel", _style_box(Color.TRANSPARENT, C_BLUE, 1, 3))
+	quote_panel.visible = false
 	outer.add_child(quote_panel)
 
 	var quote_margin := MarginContainer.new()
@@ -398,9 +396,9 @@ func _build_center_panel() -> Control:
 	quote_label.add_theme_font_size_override("font_size", 17)
 	quote_margin.add_child(quote_label)
 
-	var choice_title := _label("请选择你的行动", 14, C_MUTED, FONT_SERIF_REGULAR)
-	choice_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	outer.add_child(choice_title)
+	choice_title_label = _label("请选择你的行动", 14, C_MUTED, FONT_SERIF_REGULAR)
+	choice_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	outer.add_child(choice_title_label)
 
 	choice_list = VBoxContainer.new()
 	choice_list.add_theme_constant_override("separation", 10)
@@ -472,7 +470,7 @@ func _build_right_panel() -> Control:
 	title_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title_row.add_child(title_spacer)
 
-	title_row.add_child(_small_framed_label("已读", Vector2(46, 23), 13, C_BLUE, Color.TRANSPARENT, C_BLUE, 1, 2, FONT_SERIF_REGULAR))
+	title_row.add_child(_small_framed_label("当前", Vector2(46, 23), 13, C_BLUE, Color.TRANSPARENT, C_BLUE, 1, 2, FONT_SERIF_REGULAR))
 
 	var body_margin := MarginContainer.new()
 	body_margin.add_theme_constant_override("margin_left", 14)
@@ -508,137 +506,478 @@ func _build_right_panel() -> Control:
 	box.add_child(_section_title("节点属性"))
 
 	box.add_child(_attr_row("类型", "type"))
-	box.add_child(_attr_row("探索条件", "condition"))
+	box.add_child(_attr_row("发生地点", "location"))
 	box.add_child(_attr_row("相关角色", "character"))
-	box.add_child(_attr_row("探索奖励", "reward"))
+	box.add_child(_attr_row("存档状态", "autosave"))
 
 	return panel
 
 
-func _load_demo_node() -> void:
-	var ok: bool = StoryManager.ensure_story_loaded()
-
-	if not ok:
-		push_error("MainUI: failed to load story data.")
+func _load_case() -> void:
+	if not loader.load_nodes():
+		push_error("MainUI: failed to load control_backup nodes.json.")
 		return
 
-	_render_node(StoryManager.get_render_data())
+	var initial_node_id: String = loader.get_initial_node_id()
+
+	if initial_node_id == "":
+		push_error("MainUI: initial node id is empty.")
+		return
+
+	_show_node(initial_node_id)
 
 
-func _render_node(data: Dictionary) -> void:
-	chapter_small_label.text = str(data.get("chapter", ""))
+func _show_node(node_id: String) -> void:
+	var node_data: Dictionary = loader.get_node(node_id)
+
+	if node_data.is_empty():
+		push_warning("MainUI: node not found: " + node_id)
+		return
+
+	var autosave: bool = bool(node_data.get("autosave", false))
+	runtime_state.set_current_node(node_id, autosave)
+	_render_node(node_data)
+
+	if story_scroll != null:
+		story_scroll.scroll_vertical = 0
+
+
+func _render_node(node_data: Dictionary) -> void:
+	chapter_small_label.text = _format_case_label(str(loader.data.get("case_id", "CASE 01")))
 
 	chapter_dropdown.clear()
+	chapter_dropdown.add_item(loader.get_chapter_title())
+	chapter_dropdown.selected = 0
 
-	var time_options_raw: Variant = data.get("time_options", [])
-
-	if time_options_raw is Array:
-		for item in time_options_raw:
-			chapter_dropdown.add_item(str(item))
-
-	if chapter_dropdown.item_count > 0:
-		chapter_dropdown.selected = int(clamp(int(data.get("time_index", 0)), 0, chapter_dropdown.item_count - 1))
-
-	chapter_intro_label.text = str(data.get("chapter_intro", ""))
-	target_text_label.text = str(data.get("target", ""))
+	chapter_intro_label.text = loader.get_chapter_intro()
+	target_text_label.text = loader.get_current_goal()
 
 	_clear_children(keyword_grid)
 
-	var keywords: Array = []
-	var raw_keywords: Variant = data.get("keywords", [])
+	for keyword in loader.get_discovered_keywords():
+		keyword_grid.add_child(_keyword_tag(str(keyword)))
 
-	if raw_keywords is Array:
-		keywords = raw_keywords
+	_set_framed_label_text(node_type_label, str(node_data.get("node_type", "事件节点")))
+	story_title_label.text = str(node_data.get("title", ""))
 
-	for word in keywords:
-		keyword_grid.add_child(_keyword_tag(str(word)))
+	_render_audio_cards(node_data)
+	_render_image_cards(node_data)
+	_render_story_body(node_data)
+	_render_choices(node_data)
+	_render_right_panel(node_data)
 
-	keyword_count_label.text = "（%d / %d）" % [
-		int(data.get("keyword_found", keywords.size())),
-		int(data.get("keyword_total", keywords.size()))
-	]
+	call_deferred("_apply_story_scrollbar_style")
 
-	var progress: int = int(data.get("progress", 0))
-	progress_percent_label.text = "%d%%" % progress
-	progress_bar.value = progress
 
-	read_nodes_value_label.text = str(data.get("read_nodes", "0 / 0"))
-	chapter_explore_value_label.text = str(data.get("chapter_explore", "0%"))
-
-	_set_framed_label_text(node_type_label, str(data.get("node_type", "")))
-	story_title_label.text = str(data.get("title", ""))
-
+func _render_story_body(node_data: Dictionary) -> void:
 	story_body_label.clear()
 
-	var body: Array = []
-	var raw_body: Variant = data.get("body", [])
+	var body: Variant = node_data.get("body", [])
 
-	if raw_body is Array:
-		body = raw_body
+	if body is Array:
+		for index in range(body.size()):
+			story_body_label.append_text(str(body[index]))
 
-	for i in range(body.size()):
-		story_body_label.append_text(str(body[i]))
+			if index < body.size() - 1:
+				story_body_label.append_text("\n\n")
+	else:
+		story_body_label.append_text(str(body))
 
-		if i < body.size() - 1:
-			story_body_label.append_text("\n\n")
+	var quote_text: String = str(node_data.get("quote", ""))
+	quote_panel.visible = quote_text != ""
+	quote_label.text = quote_text
 
-	quote_label.text = str(data.get("quote", ""))
 
+func _render_choices(node_data: Dictionary) -> void:
 	_clear_children(choice_list)
 
-	var choices: Variant = data.get("choices", [])
+	var choices: Variant = node_data.get("choices", [])
+	var has_choices: bool = choices is Array and not choices.is_empty()
+	choice_title_label.visible = has_choices
+
+	if not (choices is Array):
+		return
+
+	for choice in choices:
+		if not (choice is Dictionary):
+			continue
+
+		var title: String = str(choice.get("title", "未命名选择"))
+		var description: String = _choice_description(choice)
+		var icon_name: String = _choice_icon_name(choice)
+
+		choice_list.add_child(_choice_button(
+			_icon_by_name(icon_name),
+			title,
+			description,
+			choice
+		))
+
+
+func _render_right_panel(node_data: Dictionary) -> void:
+	current_node_title.text = str(node_data.get("title", ""))
+	current_node_body.text = _node_summary(node_data)
+
+	_clear_children(clue_list)
+	_add_clue_ids(node_data.get("text_clues", []), "TXT", ICON_BOOK_OPEN)
+	_add_clue_ids(node_data.get("audio_clues", []), "AUD", ICON_ARCHIVE)
+
+	for image_item in _collect_image_items(node_data):
+		if not (image_item is Dictionary):
+			continue
+
+		clue_list.add_child(_clue_item(
+			ICON_RECTANGLE_HORIZONTAL,
+			str(image_item.get("title", "图像线索")),
+			"IMG · %s" % str(image_item.get("id", "未编号"))
+		))
+
+	if clue_list.get_child_count() == 0:
+		clue_list.add_child(_clue_item(
+			ICON_SEARCH,
+			"暂无关联线索",
+			"当前节点没有登记线索"
+		))
+
+	_clear_children(graph_slot)
+	graph_slot.add_child(_mini_graph(_build_graph_data(node_data)))
+
+	attr_type_value.text = str(node_data.get("node_type", "—"))
+	attr_location_value.text = str(node_data.get("location", "—"))
+	attr_character_value.text = _join_array(node_data.get("characters", []))
+
+	var autosave_text: String = "安全节点" if bool(node_data.get("autosave", false)) else "非安全节点"
+	var safe_id: String = runtime_state.last_safe_autosave_node_id
+
+	if safe_id == "":
+		safe_id = "无"
+
+	attr_autosave_value.text = "%s / %s" % [autosave_text, safe_id]
+
+
+func _render_audio_cards(node_data: Dictionary) -> void:
+	_clear_children(audio_slot)
+
+	var audio_clues: Variant = node_data.get("audio_clues", [])
+	var node_type: String = str(node_data.get("node_type", ""))
+	var has_audio: bool = (audio_clues is Array and not audio_clues.is_empty()) or node_type.contains("音频")
+
+	if not has_audio:
+		return
+
+	var card := PanelContainer.new()
+	card.custom_minimum_size = Vector2(STORY_CONTENT_WIDTH, 174)
+	card.add_theme_stylebox_override("panel", _style_box(Color.TRANSPARENT, C_BLUE, 1, 4))
+	audio_slot.add_child(card)
+
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 18)
+	margin.add_theme_constant_override("margin_right", 18)
+	margin.add_theme_constant_override("margin_top", 14)
+	margin.add_theme_constant_override("margin_bottom", 14)
+	card.add_child(margin)
+
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 9)
+	margin.add_child(box)
+
+	var top_row := HBoxContainer.new()
+	top_row.add_theme_constant_override("separation", 10)
+	box.add_child(top_row)
+
+	var title := _label("音频线索 / AUDIO EVIDENCE", 15, C_BLUE, FONT_SERIF_SEMIBOLD)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top_row.add_child(title)
+
+	var audio_id := _label(_first_array_value(audio_clues, "未编号"), 13, C_SUBTEXT, FONT_MONO_REGULAR)
+	top_row.add_child(audio_id)
+
+	var waveform: Control = AudioWaveformPlaceholder.new()
+	waveform.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	box.add_child(waveform)
+
+	var bottom_row := HBoxContainer.new()
+	bottom_row.add_theme_constant_override("separation", 12)
+	box.add_child(bottom_row)
+
+	var play_button := _audio_control_button("▶")
+	play_button.disabled = true
+	bottom_row.add_child(play_button)
+
+	var time_label := _label("音频播放暂未接入", 14, C_SUBTEXT, FONT_SERIF_REGULAR)
+	time_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	bottom_row.add_child(time_label)
+
+
+func _render_image_cards(node_data: Dictionary) -> void:
+	_clear_children(image_slot)
+
+	for image_item in _collect_image_items(node_data):
+		if image_item is Dictionary:
+			image_slot.add_child(_build_image_card(image_item))
+
+
+func _collect_image_items(node_data: Dictionary) -> Array:
+	var result: Array = []
+	var floor_plan: Variant = node_data.get("floor_plan", {})
+
+	if floor_plan is Dictionary and not floor_plan.is_empty():
+		result.append(floor_plan)
+
+	var image_clues: Variant = node_data.get("image_clues", [])
+
+	if image_clues is Array:
+		for image_clue in image_clues:
+			if image_clue is Dictionary and not image_clue.is_empty():
+				result.append(image_clue)
+
+	return result
+
+
+func _build_image_card(image_data: Dictionary) -> Control:
+	var container := VBoxContainer.new()
+	container.custom_minimum_size.x = STORY_CONTENT_WIDTH
+	container.add_theme_constant_override("separation", 8)
+
+	var header := HBoxContainer.new()
+	header.add_theme_constant_override("separation", 12)
+	container.add_child(header)
+
+	var title_box := VBoxContainer.new()
+	title_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title_box.add_theme_constant_override("separation", 1)
+	header.add_child(title_box)
+
+	title_box.add_child(_label("结构图 / FLOOR PLAN", 13, C_MUTED, FONT_PUBLIC_REGULAR))
+	title_box.add_child(_label(str(image_data.get("title", "图像线索")), 18, C_BLUE, FONT_SERIF_SEMIBOLD))
+
+	var image_id: String = str(image_data.get("id", ""))
+
+	if image_id != "":
+		header.add_child(_small_framed_label(
+			image_id,
+			Vector2(190, 28),
+			12,
+			C_BLUE,
+			Color.TRANSPARENT,
+			C_BLUE,
+			1,
+			2,
+			FONT_MONO_REGULAR
+		))
+
+	var frame := PanelContainer.new()
+	frame.custom_minimum_size = Vector2(STORY_CONTENT_WIDTH, IMAGE_CARD_HEIGHT)
+	frame.add_theme_stylebox_override("panel", _style_box(Color.TRANSPARENT, C_BLUE, 1, 3))
+	container.add_child(frame)
+
+	var frame_margin := MarginContainer.new()
+	frame_margin.add_theme_constant_override("margin_left", 10)
+	frame_margin.add_theme_constant_override("margin_right", 10)
+	frame_margin.add_theme_constant_override("margin_top", 10)
+	frame_margin.add_theme_constant_override("margin_bottom", 10)
+	frame.add_child(frame_margin)
+
+	var image_path: String = str(image_data.get("image_path", ""))
+	var texture: Texture2D = null
+
+	if image_path != "" and ResourceLoader.exists(image_path):
+		texture = load(image_path) as Texture2D
+
+	if texture == null:
+		var missing := _label("图像资源不可用：%s" % image_path, 14, C_MUTED, FONT_SERIF_REGULAR)
+		missing.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		missing.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		missing.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		frame_margin.add_child(missing)
+		push_warning("MainUI: image resource not found or invalid: " + image_path)
+		return container
+
+	var texture_rect := TextureRect.new()
+	texture_rect.texture = texture
+	texture_rect.custom_minimum_size.y = IMAGE_CARD_HEIGHT - 20
+	texture_rect.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	texture_rect.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	texture_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	texture_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	texture_rect.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	texture_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	frame_margin.add_child(texture_rect)
+
+	return container
+
+
+func _choice_description(choice: Dictionary) -> String:
+	var explicit_desc: String = str(choice.get("desc", ""))
+
+	if explicit_desc != "":
+		return explicit_desc
+
+	var action: String = str(choice.get("action", ""))
+
+	if action == "play_audio":
+		return "播放当前节点登记的音频线索（功能占位）"
+
+	if action == "load_last_safe_autosave":
+		return "返回进入错误或失败节点之前的最近安全节点"
+
+	var target_id: String = _get_choice_target_node_id(choice)
+
+	if target_id != "":
+		var target_data: Dictionary = loader.get_node(target_id)
+
+		if not target_data.is_empty():
+			return "%s · %s" % [
+				str(target_data.get("node_type", "剧情节点")),
+				str(target_data.get("location", "未知地点"))
+			]
+
+	return "继续调查"
+
+
+func _choice_icon_name(choice: Dictionary) -> String:
+	var action: String = str(choice.get("action", ""))
+	var title: String = str(choice.get("title", ""))
+
+	if action == "play_audio" or title.contains("录音") or title.contains("频谱") or title.contains("回声"):
+		return "archive"
+
+	if action == "load_last_safe_autosave":
+		return "book"
+
+	if title.contains("结构图") or title.contains("通道") or title.contains("门缝") or title.contains("地面"):
+		return "rect"
+
+	if title.contains("脚步"):
+		return "footprints"
+
+	return "search"
+
+
+func _get_choice_target_node_id(choice: Dictionary) -> String:
+	if choice.has("to"):
+		return str(choice.get("to", ""))
+
+	return str(choice.get("target_node_id", ""))
+
+
+func _node_summary(node_data: Dictionary) -> String:
+	var body: Variant = node_data.get("body", [])
+
+	if body is Array and not body.is_empty():
+		return str(body[0])
+
+	return str(body)
+
+
+func _add_clue_ids(value: Variant, prefix: String, icon_texture: Texture2D) -> void:
+	if not (value is Array):
+		return
+
+	for clue_id in value:
+		clue_list.add_child(_clue_item(
+			icon_texture,
+			str(clue_id),
+			prefix + " · 已登记线索"
+		))
+
+
+func _build_graph_data(node_data: Dictionary) -> Dictionary:
+	var current_pos := Vector2(117, 78)
+	var target_positions: Array[Vector2] = [
+		Vector2(12, 22),
+		Vector2(222, 22),
+		Vector2(117, 145)
+	]
+	var graph_nodes: Array = [
+		{
+			"title": _short_graph_title(str(node_data.get("title", "当前节点"))),
+			"pos": current_pos,
+			"active": true
+		}
+	]
+	var edges: Array = []
+	var choices: Variant = node_data.get("choices", [])
+	var target_index: int = 0
 
 	if choices is Array:
 		for choice in choices:
 			if not (choice is Dictionary):
 				continue
 
-			choice_list.add_child(_choice_button(
-				_icon_by_name(str(choice.get("icon", "search"))),
-				str(choice.get("title", "")),
-				str(choice.get("desc", ""))
-			))
+			var target_id: String = _get_choice_target_node_id(choice)
 
-	current_node_title.text = str(data.get("title", ""))
-	current_node_body.text = str(data.get("current_summary", ""))
-
-	_clear_children(clue_list)
-
-	var clues: Variant = data.get("clues", [])
-
-	if clues is Array:
-		for clue in clues:
-			if not (clue is Dictionary):
+			if target_id == "" or target_index >= target_positions.size():
 				continue
 
-			clue_list.add_child(_clue_item(
-				_icon_by_name(str(clue.get("icon", "search"))),
-				str(clue.get("title", "")),
-				str(clue.get("desc", ""))
-			))
+			var target_data: Dictionary = loader.get_node(target_id)
+			var target_title: String = target_id
 
-	_clear_children(graph_slot)
+			if not target_data.is_empty():
+				target_title = str(target_data.get("title", target_id))
 
-	var graph_data: Dictionary = {}
-	var raw_graph: Variant = data.get("graph", {})
+			var target_pos: Vector2 = target_positions[target_index]
+			graph_nodes.append({
+				"title": _short_graph_title(target_title),
+				"pos": target_pos,
+				"active": false
+			})
+			edges.append([current_pos + Vector2(48, 11), target_pos + Vector2(48, 11)])
+			target_index += 1
 
-	if raw_graph is Dictionary:
-		graph_data = raw_graph
+	return {
+		"nodes": graph_nodes,
+		"edges": edges
+	}
 
-	graph_slot.add_child(_mini_graph(graph_data))
 
-	var attrs: Dictionary = {}
-	var raw_attrs: Variant = data.get("attrs", {})
+func _short_graph_title(text: String) -> String:
+	if text.length() <= 8:
+		return text
 
-	if raw_attrs is Dictionary:
-		attrs = raw_attrs
+	return text.substr(0, 7) + "…"
 
-	attr_type_value.text = str(attrs.get("type", "—"))
-	attr_condition_value.text = str(attrs.get("condition", "—"))
-	attr_character_value.text = str(attrs.get("character", "—"))
-	attr_reward_value.text = str(attrs.get("reward", "—"))
 
-	call_deferred("_apply_story_scrollbar_style")
+func _join_array(value: Variant) -> String:
+	if not (value is Array) or value.is_empty():
+		return "无"
+
+	var parts := PackedStringArray()
+
+	for item in value:
+		parts.append(str(item))
+
+	return " / ".join(parts)
+
+
+func _format_case_label(case_id: String) -> String:
+	if case_id == "":
+		return "CASE 01"
+
+	return case_id.replace("_", " ").to_upper()
+
+
+func _first_array_value(value: Variant, fallback: String) -> String:
+	if value is Array and not value.is_empty():
+		return str(value[0])
+
+	return fallback
+
+
+func _audio_control_button(text: String) -> Button:
+	var button := Button.new()
+	button.text = text
+	button.custom_minimum_size = Vector2(38, 38)
+	button.focus_mode = Control.FOCUS_NONE
+	button.add_theme_font_override("font", FONT_MONO_MEDIUM)
+	button.add_theme_font_size_override("font_size", 15)
+	button.add_theme_color_override("font_color", C_WHITE)
+	button.add_theme_color_override("font_disabled_color", C_WHITE)
+	button.add_theme_stylebox_override("normal", _style_box(C_BLUE, C_BLUE, 1, 19))
+	button.add_theme_stylebox_override("hover", _style_box(C_BLUE_DARK, C_BLUE_DARK, 1, 19))
+	button.add_theme_stylebox_override("pressed", _style_box(C_BLUE_DARK, C_BLUE_DARK, 1, 19))
+	button.add_theme_stylebox_override("disabled", _style_box(C_BLUE, C_BLUE, 1, 19))
+	return button
 
 
 func _chapter_dropdown() -> OptionButton:
@@ -708,7 +1047,7 @@ func _nav_button(texture: Texture2D, text: String, active: bool, scene_path: Str
 	return root_control
 
 
-func _choice_button(texture: Texture2D, title: String, desc: String) -> Control:
+func _choice_button(texture: Texture2D, title: String, desc: String, choice: Dictionary) -> Control:
 	var root_control := Control.new()
 	root_control.custom_minimum_size = Vector2(STORY_CONTENT_WIDTH, 62)
 
@@ -749,6 +1088,7 @@ func _choice_button(texture: Texture2D, title: String, desc: String) -> Control:
 
 	var desc_label := _label(desc, 14, C_SUBTEXT, FONT_SERIF_REGULAR)
 	desc_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	desc_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	text_box.add_child(desc_label)
 
 	var arrow := _label("›", 28, C_BLUE, FONT_MONO_MEDIUM)
@@ -769,7 +1109,7 @@ func _choice_button(texture: Texture2D, title: String, desc: String) -> Control:
 	)
 
 	hit_button.pressed.connect(func():
-		_on_choice_pressed(title)
+		_on_choice_pressed(choice)
 	)
 
 	root_control.add_child(hit_button)
@@ -901,32 +1241,12 @@ func _attr_row(left: String, key: String) -> Control:
 	match key:
 		"type":
 			attr_type_value = r
-		"condition":
-			attr_condition_value = r
+		"location":
+			attr_location_value = r
 		"character":
 			attr_character_value = r
-		"reward":
-			attr_reward_value = r
-
-	return row
-
-
-func _stat_row_with_ref(left: String, key: String) -> Control:
-	var row := HBoxContainer.new()
-	row.add_child(_label(left, 15, C_BLUE, FONT_SERIF_REGULAR))
-
-	var spacer := Control.new()
-	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(spacer)
-
-	var r := _label("", 15, C_BLUE, FONT_SERIF_REGULAR)
-	row.add_child(r)
-
-	match key:
-		"read_nodes":
-			read_nodes_value_label = r
-		"chapter_explore":
-			chapter_explore_value_label = r
+		"autosave":
+			attr_autosave_value = r
 
 	return row
 
@@ -1129,21 +1449,57 @@ func _apply_story_scrollbar_style() -> void:
 	if bar == null:
 		return
 
+	# 默认保持低对比度；鼠标悬停时才切换为界面主蓝色。
+	var scrollbar_track_color := Color("#EDF2FC")
+	var scrollbar_idle_color := Color("#BFD0F6")
+
 	bar.custom_minimum_size = Vector2(8, 0)
-	bar.add_theme_stylebox_override("scroll", _style_box(Color("#E4E9F6"), Color.TRANSPARENT, 0, 3))
-	bar.add_theme_stylebox_override("grabber", _style_box(C_BLUE, C_BLUE, 0, 3))
-	bar.add_theme_stylebox_override("grabber_highlight", _style_box(C_BLUE_DARK, C_BLUE_DARK, 0, 3))
-	bar.add_theme_stylebox_override("grabber_pressed", _style_box(C_BLUE_DARK, C_BLUE_DARK, 0, 3))
+	bar.add_theme_stylebox_override(
+		"scroll",
+		_style_box(scrollbar_track_color, Color.TRANSPARENT, 0, 3)
+	)
+	bar.add_theme_stylebox_override(
+		"scroll_focus",
+		_style_box(scrollbar_track_color, Color.TRANSPARENT, 0, 3)
+	)
+	bar.add_theme_stylebox_override(
+		"grabber",
+		_style_box(scrollbar_idle_color, scrollbar_idle_color, 0, 3)
+	)
+	bar.add_theme_stylebox_override(
+		"grabber_highlight",
+		_style_box(C_BLUE, C_BLUE, 0, 3)
+	)
+	bar.add_theme_stylebox_override(
+		"grabber_pressed",
+		_style_box(C_BLUE_DARK, C_BLUE_DARK, 0, 3)
+	)
 
 
-func _on_choice_pressed(choice_title: String) -> void:
-	var ok: bool = StoryManager.choose_by_title(choice_title)
+func _on_choice_pressed(choice: Dictionary) -> void:
+	var action: String = str(choice.get("action", ""))
 
-	if not ok:
-		push_warning("MainUI: choice failed: " + choice_title)
+	if action == "play_audio":
+		push_warning("MainUI: audio playback is not connected in this Vertical Slice yet.")
 		return
 
-	_render_node(StoryManager.get_render_data())
+	if action == "load_last_safe_autosave":
+		var safe_id: String = runtime_state.last_safe_autosave_node_id
+
+		if safe_id != "":
+			_show_node(safe_id)
+		else:
+			push_warning("MainUI: no safe autosave node is available.")
+
+		return
+
+	var target_node_id: String = _get_choice_target_node_id(choice)
+
+	if target_node_id == "":
+		push_warning("MainUI: choice has no target node: " + str(choice.get("title", "")))
+		return
+
+	_show_node(target_node_id)
 
 
 func _change_scene_if_exists(scene_path: String) -> void:

@@ -118,6 +118,11 @@
 			"audio_clues": [],
 			"text_clues": ["clue_room_layout", "clue_double_window"],
 			"room_refs": ["control_room", "vocal_booth", "outer_corridor"],
+			"floor_plan": {
+				"id": "floor_plan_01_objects",
+				"title": "录音棚基础户型图",
+				"image_path": "res://assets/images/floor_plan_01_objects.png"
+			},
 			"choices": [
 				{
 					"title": "检查人声棚地面材料",
