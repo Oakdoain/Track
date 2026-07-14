@@ -17,13 +17,52 @@
 		},
 		{
 			"keyword": "结构图",
+			"normalized_keyword": "结构图",
 			"source_nodes": ["node_0024"],
-			"note": "第二阶段仅用于数据显示。"
+			"note": "V0.3 正式推理规则：用于建立空间结构与声源路径的关系。",
+			"connections": [
+				{
+					"source_node_id": "node_0024",
+					"target_node_id": "node_0028",
+					"outcome": "correct",
+					"unlock_node_id": "node_0029",
+					"feedback": "结构图显示外侧通道比人声棚更靠近备份机柜，控制室门缝则提供了声音进入录音的路径。"
+				},
+				{
+					"source_node_id": "node_0024",
+					"target_node_id": "node_0025",
+					"outcome": "error",
+					"error_node_id": "node_0032",
+					"feedback": "结构图只标示空间关系；人声棚厚毯反而会削弱清晰鞋跟声，不能据此把 A-17 的脚步归入棚内。"
+				}
+			]
 		},
 		{
 			"keyword": "人声棚",
 			"source_nodes": ["node_0025", "node_0032"],
 			"note": "第二阶段仅用于数据显示。"
+		},
+		{
+			"keyword": "厚毯",
+			"normalized_keyword": "厚毯",
+			"source_nodes": ["node_0025"],
+			"note": "V0.3 正式推理规则：用于判断棚内脚步声应当更闷。",
+			"connections": [
+				{
+					"source_node_id": "node_0025",
+					"target_node_id": "node_0026",
+					"outcome": "correct",
+					"unlock_node_id": "node_0028",
+					"feedback": "厚毯几乎不会留下清晰鞋跟声，这与 A-17 中短促、边缘清晰的脚步矛盾，应继续检查其他传声路径。"
+				},
+				{
+					"source_node_id": "node_0025",
+					"target_node_id": "node_0032",
+					"outcome": "error",
+					"error_node_id": "node_0032",
+					"feedback": "厚毯和完整吸音墙都会压低棚内脚步；用这条证据支持“棚内踱步”与现场条件相反。"
+				}
+			]
 		},
 		{
 			"keyword": "脚步声",
@@ -32,13 +71,33 @@
 		},
 		{
 			"keyword": "门缝",
+			"normalized_keyword": "门缝",
 			"source_nodes": ["node_0028", "node_0031"],
-			"note": "第二阶段仅用于数据显示。"
+			"note": "V0.3 正式推理规则：用于验证外侧通道声音进入控制室的路径。",
+			"connections": [
+				{
+					"source_node_id": "node_0028",
+					"target_node_id": "node_0029",
+					"outcome": "correct",
+					"unlock_node_id": "node_0030",
+					"feedback": "老化门缝能让外侧通道声进入控制室；与走廊回声比对后，这条传声路径得到支持。"
+				}
+			]
 		},
 		{
 			"keyword": "走廊回声",
+			"normalized_keyword": "走廊回声",
 			"source_nodes": ["node_0029"],
-			"note": "第二阶段仅用于数据显示。"
+			"note": "V0.3 正式推理规则：用于排除人声棚并推进到外侧通道。",
+			"connections": [
+				{
+					"source_node_id": "node_0029",
+					"target_node_id": "node_0030",
+					"outcome": "correct",
+					"unlock_node_id": "node_0031",
+					"feedback": "走廊回声更亮，短促反射贴近 A-17；它与厚毯造成的闷声相反，支持脚步不在人声棚内。"
+				}
+			]
 		}
 	]
 }

@@ -1,6 +1,13 @@
 extends Control
 
+signal initialization_succeeded
+signal initialization_failed(message: String)
+signal settings_requested(source_context: String)
+
 const AudioWaveformPlaceholder := preload("res://scripts/case/AudioWaveformPlaceholder.gd")
+const CaseGraphCanvasScript := preload("res://scripts/case/CaseGraphCanvas.gd")
+const SaveUIScene := preload("res://scenes/ui/SaveUI.tscn")
+const LoadUIScene := preload("res://scenes/ui/LoadUI.tscn")
 
 const MIN_WINDOW_SIZE := Vector2i(1280, 720)
 
@@ -11,6 +18,16 @@ const RIGHT_PANEL_WIDTH := 400
 
 const STORY_CONTENT_WIDTH := 920
 const IMAGE_CARD_HEIGHT := 540
+const GRAPH_NODE_SIZE := Vector2(260, 96)
+const GRAPH_CURRENT_ANCHOR := Vector2(0.5, 0.32)
+const KEYWORD_GRAPH_MIN_SIZE := Vector2(150, 36)
+const KEYWORD_GRAPH_MAX_WIDTH := 220.0
+const KEYWORD_GRAPH_OFFSET := 20.0
+const KEYWORD_GRAPH_GAP := 8.0
+const KEYWORD_ACTION_SIZE := Vector2(176, 42)
+const GRAPH_STATUS_SIZE := Vector2(340, 76)
+const CASE_AUDIO_DATA_PATH := "res://data/cases/case_01/control_backup/audio_clues.json"
+const CASE_STATUS_SIZE := Vector2(380, 48)
 
 const TOP_BAR_MARGIN_LEFT := 24
 const TOP_BAR_MARGIN_RIGHT := 24
@@ -64,6 +81,17 @@ var _last_viewport_size: Vector2 = Vector2.ZERO
 
 var root: Control
 var bg: ColorRect
+var story_view: Control
+var graph_view: Control
+var story_nav_button: Control
+var graph_nav_button: Control
+var save_nav_button: Control
+var load_nav_button: Control
+var settings_nav_button: Control
+var save_view: Control
+var load_view: Control
+var _data_page_open: bool = false
+var _return_to_graph_view: bool = false
 
 var chapter_small_label: Label
 var chapter_dropdown: OptionButton
@@ -71,20 +99,40 @@ var chapter_intro_label: Label
 
 var loader: CaseDataLoader
 var runtime_state: CaseRuntimeState
+var audio_manager: Node
+var save_manager: SaveManager
 
 var target_text_label: Label
-var keyword_grid: GridContainer
+var keyword_grid: HFlowContainer
+var keyword_width_container: MarginContainer
 
 var node_type_label: PanelContainer
 var story_title_label: Label
 var story_scroll: ScrollContainer
 var audio_slot: VBoxContainer
+var _audio_card_controls: Dictionary = {}
+var _audio_finished_id: String = ""
+var _audio_feedback_generation: int = 0
 var image_slot: VBoxContainer
 var story_body_label: RichTextLabel
 var quote_panel: PanelContainer
 var quote_label: Label
 var choice_title_label: Label
 var choice_list: VBoxContainer
+
+var graph_scroll: ScrollContainer
+var graph_canvas: CaseGraphCanvas
+var graph_status_panel: PanelContainer
+var graph_status_label: Label
+var _selected_keyword_instance_id: String = ""
+var _graph_feedback_generation: int = 0
+var _keyword_graph_layout: Dictionary = {}
+
+var keyword_action_panel: PanelContainer
+var keyword_action_button: Button
+var _pending_keyword_text: String = ""
+var _pending_keyword_source_node_id: String = ""
+var _keyword_feedback_generation: int = 0
 
 var current_node_title: Label
 var current_node_body: Label
@@ -96,6 +144,30 @@ var attr_location_value: Label
 var attr_character_value: Label
 var attr_autosave_value: Label
 
+var case_status_panel: PanelContainer
+var case_status_label: Label
+var _case_status_generation: int = 0
+var _startup_mode: String = "direct"
+var _startup_runtime_data: Dictionary = {}
+var _startup_configured: bool = false
+var _suppress_disk_autosave: bool = false
+var _initialization_error: String = ""
+
+
+func configure_startup(mode: String, runtime_data: Dictionary = {}) -> void:
+	if is_node_ready():
+		push_warning("MainUI: configure_startup must be called before the node enters the tree.")
+		return
+
+	if mode != "new_game" and mode != "loaded" and mode != "direct":
+		push_warning("MainUI: unsupported startup mode; falling back to direct development mode: " + mode)
+		_startup_mode = "direct"
+	else:
+		_startup_mode = mode
+
+	_startup_runtime_data = runtime_data.duplicate(true)
+	_startup_configured = true
+
 
 func _ready() -> void:
 	_setup_window()
@@ -103,11 +175,28 @@ func _ready() -> void:
 
 	loader = CaseDataLoader.new()
 	runtime_state = CaseRuntimeState.new()
+	save_manager = SaveManager.new()
+	var save_init_result: Dictionary = save_manager.initialize()
+
+	if not bool(save_init_result.get("success", false)):
+		push_warning("MainUI: save manager initialization failed: " + str(save_init_result.get("error", "")))
 
 	_build_ui()
-	_load_case()
+	_build_data_pages()
+	_setup_audio_manager()
+	if not _initialize_case_for_startup():
+		initialization_failed.emit(
+			_initialization_error if _initialization_error != "" else "案件初始化失败"
+		)
+		return
+
+	initialization_succeeded.emit()
 	call_deferred("_force_self_to_viewport")
-	call_deferred("_apply_story_scrollbar_style")
+	call_deferred("_apply_scrollbar_styles")
+
+
+func _exit_tree() -> void:
+	_stop_audio_for_context_change()
 
 
 func _process(_delta: float) -> void:
@@ -116,11 +205,46 @@ func _process(_delta: float) -> void:
 	if viewport_size != _last_viewport_size:
 		_force_self_to_viewport()
 
+	_refresh_audio_progress_display()
+
+
+func _input(event: InputEvent) -> void:
+	if event is InputEventKey:
+		var key_event: InputEventKey = event as InputEventKey
+
+		if (
+			key_event.keycode == KEY_ESCAPE
+			and key_event.pressed
+			and not key_event.echo
+			and _selected_keyword_instance_id != ""
+		):
+			_cancel_keyword_connection_selection(true)
+			get_viewport().set_input_as_handled()
+
+		return
+
+	if not (event is InputEventMouseButton):
+		return
+
+	var mouse_event: InputEventMouseButton = event as InputEventMouseButton
+
+	if mouse_event.button_index != MOUSE_BUTTON_LEFT or not mouse_event.pressed:
+		return
+
+	if keyword_action_panel == null or not keyword_action_panel.visible:
+		return
+
+	var mouse_position: Vector2 = get_viewport().get_mouse_position()
+
+	if not keyword_action_panel.get_global_rect().has_point(mouse_position):
+		_hide_keyword_action()
+
 
 func _setup_window() -> void:
 	var window: Window = get_window()
 
-	window.mode = Window.MODE_MAXIMIZED
+	if not _startup_configured:
+		window.mode = Window.MODE_MAXIMIZED
 	window.borderless = false
 	window.unresizable = false
 	window.min_size = MIN_WINDOW_SIZE
@@ -150,6 +274,12 @@ func _force_self_to_viewport() -> void:
 	if root != null:
 		_fill_rect(root)
 
+	if case_status_panel != null:
+		case_status_panel.position = Vector2(
+			maxf(16.0, (viewport_size.x - CASE_STATUS_SIZE.x) * 0.5),
+			TOP_BAR_HEIGHT + 16.0
+		)
+
 
 func _build_ui() -> void:
 	bg = ColorRect.new()
@@ -178,6 +308,13 @@ func _build_ui() -> void:
 	var center_panel: Control = _build_center_panel()
 	root.add_child(center_panel)
 	_dock_center(center_panel, LEFT_PANEL_WIDTH, RIGHT_PANEL_WIDTH, TOP_BAR_HEIGHT)
+
+	keyword_action_panel = _build_keyword_action_panel()
+	root.add_child(keyword_action_panel)
+
+	case_status_panel = _build_case_status_panel()
+	root.add_child(case_status_panel)
+	_force_self_to_viewport()
 
 
 func _build_topbar() -> Control:
@@ -224,13 +361,56 @@ func _build_topbar() -> Control:
 	row.add_child(spacer)
 
 	row.add_child(_nav_button(ICON_STEP_BACK, "回溯", false))
-	row.add_child(_nav_button(ICON_BOOK_OPEN, "剧情", true))
-	row.add_child(_nav_button(ICON_GIT_BRANCH, "图谱", false))
-	row.add_child(_nav_button(ICON_SAVE, "存档", false, "res://scenes/ui/SaveUI.tscn"))
-	row.add_child(_nav_button(ICON_FOLDER_OPEN, "读取", false))
-	row.add_child(_nav_button(ICON_SETTINGS, "设置", false))
+
+	story_nav_button = _nav_button(ICON_BOOK_OPEN, "剧情", true)
+	row.add_child(story_nav_button)
+	_get_nav_hit_button(story_nav_button).pressed.connect(_show_story_view)
+
+	graph_nav_button = _nav_button(ICON_GIT_BRANCH, "图谱", false)
+	row.add_child(graph_nav_button)
+	_get_nav_hit_button(graph_nav_button).pressed.connect(_show_graph_view)
+
+	save_nav_button = _nav_button(ICON_SAVE, "存档", false)
+	row.add_child(save_nav_button)
+	_get_nav_hit_button(save_nav_button).pressed.connect(_open_save_page)
+
+	load_nav_button = _nav_button(ICON_FOLDER_OPEN, "读取", false)
+	row.add_child(load_nav_button)
+	_get_nav_hit_button(load_nav_button).pressed.connect(_open_load_page)
+
+	settings_nav_button = _nav_button(ICON_SETTINGS, "设置", false)
+	row.add_child(settings_nav_button)
+	_get_nav_hit_button(settings_nav_button).pressed.connect(_open_settings_page)
 
 	return panel
+
+
+func _build_data_pages() -> void:
+	save_view = SaveUIScene.instantiate() as Control
+	load_view = LoadUIScene.instantiate() as Control
+
+	if save_view == null or load_view == null:
+		push_warning("MainUI: save or load page scene could not be instantiated.")
+		return
+
+	for data_view in [save_view, load_view]:
+		data_view.visible = false
+		data_view.z_index = 30
+		data_view.anchor_left = 0.0
+		data_view.anchor_top = 0.0
+		data_view.anchor_right = 1.0
+		data_view.anchor_bottom = 1.0
+		data_view.offset_left = 0.0
+		data_view.offset_top = TOP_BAR_HEIGHT
+		data_view.offset_right = 0.0
+		data_view.offset_bottom = 0.0
+		root.add_child(data_view)
+		data_view.call("configure", save_manager)
+
+	save_view.connect("return_requested", Callable(self, "_return_from_data_page"))
+	save_view.connect("save_requested", Callable(self, "_on_manual_save_requested"))
+	load_view.connect("return_requested", Callable(self, "_return_from_data_page"))
+	load_view.connect("load_requested", Callable(self, "_on_load_requested"))
 
 
 func _build_left_panel() -> Control:
@@ -239,10 +419,12 @@ func _build_left_panel() -> Control:
 	panel.add_theme_stylebox_override("panel", _style_box(C_BG, C_DIVIDER, 1, 0))
 
 	var margin := MarginContainer.new()
+	keyword_width_container = margin
 	margin.add_theme_constant_override("margin_left", SIDE_MARGIN_LEFT)
 	margin.add_theme_constant_override("margin_right", SIDE_MARGIN_RIGHT)
 	margin.add_theme_constant_override("margin_top", SIDE_MARGIN_TOP)
 	margin.add_theme_constant_override("margin_bottom", SIDE_MARGIN_BOTTOM)
+	margin.resized.connect(_update_keyword_tag_widths)
 	panel.add_child(margin)
 
 	var box := VBoxContainer.new()
@@ -295,10 +477,10 @@ func _build_left_panel() -> Control:
 	box.add_child(_left_divider())
 	box.add_child(_section_title("已发现关键词"))
 
-	keyword_grid = GridContainer.new()
-	keyword_grid.columns = 3
-	keyword_grid.add_theme_constant_override("h_separation", 8)
-	keyword_grid.add_theme_constant_override("v_separation", 8)
+	keyword_grid = HFlowContainer.new()
+	keyword_grid.add_theme_constant_override("h_separation", 6)
+	keyword_grid.add_theme_constant_override("v_separation", 6)
+	keyword_grid.resized.connect(_update_keyword_tag_widths)
 	box.add_child(keyword_grid)
 
 
@@ -310,7 +492,12 @@ func _build_center_panel() -> Control:
 	panel.name = "CenterPanel"
 	panel.add_theme_stylebox_override("panel", _style_box(C_BG, Color.TRANSPARENT, 0, 0))
 
-	# ScrollContainer 直接占满中央区域。
+	story_view = Control.new()
+	story_view.name = "StoryView"
+	_fill_rect(story_view)
+	panel.add_child(story_view)
+
+	# ScrollContainer 直接占满剧情视图。
 	# 这样垂直滚动条会贴在中央区域最右边，而不是被正文边距推向内部。
 	story_scroll = ScrollContainer.new()
 	story_scroll.name = "StoryScroll"
@@ -318,7 +505,8 @@ func _build_center_panel() -> Control:
 	story_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	story_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	story_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	panel.add_child(story_scroll)
+	_fill_rect(story_scroll)
+	story_view.add_child(story_scroll)
 
 	# 正文边距放到 ScrollContainer 内部。
 	# 内容仍保留原来的左右、上下留白，但不会影响滚动条位置。
@@ -369,12 +557,14 @@ func _build_center_panel() -> Control:
 	story_body_label.fit_content = true
 	story_body_label.bbcode_enabled = true
 	story_body_label.scroll_active = false
+	story_body_label.selection_enabled = true
 	story_body_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	story_body_label.add_theme_font_override("normal_font", FONT_SERIF_REGULAR)
 	story_body_label.add_theme_font_override("bold_font", FONT_SERIF_SEMIBOLD)
 	story_body_label.add_theme_color_override("default_color", C_TEXT)
 	story_body_label.add_theme_font_size_override("normal_font_size", 18)
 	story_body_label.add_theme_constant_override("line_separation", 4)
+	story_body_label.gui_input.connect(_on_story_body_gui_input)
 	outer.add_child(story_body_label)
 
 	quote_panel = PanelContainer.new()
@@ -408,7 +598,155 @@ func _build_center_panel() -> Control:
 	bottom_spacer.custom_minimum_size.y = 32
 	outer.add_child(bottom_spacer)
 
+	graph_view = Control.new()
+	graph_view.name = "GraphView"
+	graph_view.visible = false
+	_fill_rect(graph_view)
+	panel.add_child(graph_view)
+
+	graph_scroll = ScrollContainer.new()
+	graph_scroll.name = "GraphScroll"
+	graph_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	graph_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	_fill_rect(graph_scroll)
+	graph_view.add_child(graph_scroll)
+
+	graph_canvas = CaseGraphCanvasScript.new()
+	graph_canvas.name = "GraphCanvas"
+	graph_canvas.mouse_filter = Control.MOUSE_FILTER_PASS
+	graph_canvas.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	graph_canvas.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	graph_scroll.add_child(graph_canvas)
+
+	graph_status_panel = _build_graph_status_panel()
+	graph_view.add_child(graph_status_panel)
+
 	return panel
+
+
+func _build_graph_status_panel() -> PanelContainer:
+	var panel := PanelContainer.new()
+	panel.name = "GraphStatusPanel"
+	panel.visible = false
+	panel.position = Vector2(16.0, 16.0)
+	panel.custom_minimum_size = GRAPH_STATUS_SIZE
+	panel.size = GRAPH_STATUS_SIZE
+	panel.z_index = 50
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_theme_stylebox_override("panel", _style_box(C_WHITE, C_BLUE, 1, 4))
+
+	var margin := MarginContainer.new()
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	margin.add_theme_constant_override("margin_left", 14)
+	margin.add_theme_constant_override("margin_right", 14)
+	margin.add_theme_constant_override("margin_top", 9)
+	margin.add_theme_constant_override("margin_bottom", 9)
+	panel.add_child(margin)
+
+	graph_status_label = _label("", 14, C_BLUE, FONT_SERIF_SEMIBOLD)
+	graph_status_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	graph_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	graph_status_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	margin.add_child(graph_status_label)
+	return panel
+
+
+func _build_keyword_action_panel() -> PanelContainer:
+	var panel := PanelContainer.new()
+	panel.name = "KeywordActionPanel"
+	panel.visible = false
+	panel.z_index = 100
+	panel.custom_minimum_size = KEYWORD_ACTION_SIZE
+	panel.size = KEYWORD_ACTION_SIZE
+	panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	panel.add_theme_stylebox_override("panel", _style_box(C_WHITE, C_BLUE, 1, 4))
+
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 4)
+	margin.add_theme_constant_override("margin_right", 4)
+	margin.add_theme_constant_override("margin_top", 4)
+	margin.add_theme_constant_override("margin_bottom", 4)
+	panel.add_child(margin)
+
+	keyword_action_button = Button.new()
+	keyword_action_button.text = "提取为关键词"
+	keyword_action_button.focus_mode = Control.FOCUS_NONE
+	keyword_action_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	keyword_action_button.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	keyword_action_button.add_theme_font_override("font", FONT_SERIF_SEMIBOLD)
+	keyword_action_button.add_theme_font_size_override("font_size", 15)
+	keyword_action_button.add_theme_color_override("font_color", C_BLUE)
+	keyword_action_button.add_theme_color_override("font_hover_color", C_BLUE)
+	keyword_action_button.add_theme_color_override("font_pressed_color", C_WHITE)
+	keyword_action_button.add_theme_color_override("font_disabled_color", C_SUBTEXT)
+	keyword_action_button.add_theme_stylebox_override("normal", _style_box(Color.TRANSPARENT, Color.TRANSPARENT, 0, 3))
+	keyword_action_button.add_theme_stylebox_override("hover", _style_box(C_PANEL_SOFT, Color.TRANSPARENT, 0, 3))
+	keyword_action_button.add_theme_stylebox_override("pressed", _style_box(C_BLUE, C_BLUE, 1, 3))
+	keyword_action_button.add_theme_stylebox_override("disabled", _style_box(C_PANEL_SOFT, Color.TRANSPARENT, 0, 3))
+	keyword_action_button.pressed.connect(_on_extract_keyword_pressed)
+	margin.add_child(keyword_action_button)
+
+	return panel
+
+
+func _build_case_status_panel() -> PanelContainer:
+	var panel := PanelContainer.new()
+	panel.name = "CaseStatusPanel"
+	panel.visible = false
+	panel.z_index = 110
+	panel.custom_minimum_size = CASE_STATUS_SIZE
+	panel.size = CASE_STATUS_SIZE
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_theme_stylebox_override("panel", _style_box(C_WHITE, C_BLUE, 1, 4))
+
+	var margin := MarginContainer.new()
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	margin.add_theme_constant_override("margin_left", 14)
+	margin.add_theme_constant_override("margin_right", 14)
+	margin.add_theme_constant_override("margin_top", 8)
+	margin.add_theme_constant_override("margin_bottom", 8)
+	panel.add_child(margin)
+
+	case_status_label = _label("", 14, C_BLUE, FONT_SERIF_SEMIBOLD)
+	case_status_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	case_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	case_status_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	margin.add_child(case_status_label)
+	return panel
+
+
+func _setup_audio_manager() -> void:
+	audio_manager = get_node_or_null("/root/AudioManager")
+
+	if audio_manager == null:
+		push_warning("MainUI: AudioManager autoload is unavailable.")
+		return
+
+	var started_callable := Callable(self, "_on_audio_started")
+	var paused_callable := Callable(self, "_on_audio_paused")
+	var stopped_callable := Callable(self, "_on_audio_stopped")
+	var finished_callable := Callable(self, "_on_audio_finished")
+	var progress_callable := Callable(self, "_on_audio_progress_changed")
+
+	if not audio_manager.is_connected("audio_started", started_callable):
+		audio_manager.connect("audio_started", started_callable)
+
+	if not audio_manager.is_connected("audio_paused", paused_callable):
+		audio_manager.connect("audio_paused", paused_callable)
+
+	if not audio_manager.is_connected("audio_stopped", stopped_callable):
+		audio_manager.connect("audio_stopped", stopped_callable)
+
+	if not audio_manager.is_connected("audio_finished", finished_callable):
+		audio_manager.connect("audio_finished", finished_callable)
+
+	if not audio_manager.is_connected("audio_progress_changed", progress_callable):
+		audio_manager.connect("audio_progress_changed", progress_callable)
+
+	var loaded: bool = bool(audio_manager.call("load_audio_data", CASE_AUDIO_DATA_PATH))
+
+	if not loaded:
+		push_warning("MainUI: case audio clue data could not be loaded.")
 
 
 func _build_right_panel() -> Control:
@@ -513,30 +851,91 @@ func _build_right_panel() -> Control:
 	return panel
 
 
-func _load_case() -> void:
+func _initialize_case_for_startup() -> bool:
+	_initialization_error = ""
+
 	if not loader.load_nodes():
 		push_error("MainUI: failed to load control_backup nodes.json.")
-		return
+		_initialization_error = "案件数据加载失败"
+		return false
+
+	if not loader.load_graph_layout():
+		push_warning("MainUI: graph layout is unavailable; graph view will remain empty.")
+
+	if not loader.load_keyword_rules():
+		push_warning("MainUI: keyword connection rules are unavailable.")
 
 	var initial_node_id: String = loader.get_initial_node_id()
 
-	if initial_node_id == "":
-		push_error("MainUI: initial node id is empty.")
-		return
+	if initial_node_id == "" or loader.get_node(initial_node_id).is_empty():
+		push_error("MainUI: initial node is missing from the loaded case data.")
+		_initialization_error = "案件起始节点不可用"
+		return false
 
-	_show_node(initial_node_id)
+	match _startup_mode:
+		"loaded":
+			return _enter_with_loaded_runtime(_startup_runtime_data)
+		"new_game":
+			runtime_state.reset_runtime_state()
+			_suppress_disk_autosave = false
+			_show_node(initial_node_id)
+			return runtime_state.current_node_id == initial_node_id
+		_:
+			# Running MainUI.tscn directly remains useful for development, but it
+			# must not overwrite the player's disk autosave.
+			runtime_state.reset_runtime_state()
+			_suppress_disk_autosave = true
+			_show_node(initial_node_id)
+			return runtime_state.current_node_id == initial_node_id
+
+
+func _enter_with_loaded_runtime(runtime_data: Dictionary) -> bool:
+	if not runtime_state.validate_save_dictionary(runtime_data):
+		_initialization_error = "存档运行状态校验失败"
+		return false
+
+	var loaded_node_id: String = str(runtime_data.get("current_node_id", ""))
+	var loaded_node_data: Dictionary = loader.get_node(loaded_node_id)
+
+	if loaded_node_data.is_empty():
+		push_warning("MainUI: loaded save references a node absent from the current case.")
+		_initialization_error = "存档中的案件节点不可用"
+		return false
+
+	if not runtime_state.apply_save_dictionary(runtime_data):
+		_initialization_error = "应用存档运行状态失败"
+		return false
+
+	_stop_audio_for_context_change()
+	_render_node(loaded_node_data)
+	story_scroll.scroll_vertical = 0
+	story_view.visible = true
+	graph_view.visible = false
+	_set_nav_button_active(story_nav_button, true)
+	_set_nav_button_active(graph_nav_button, false)
+	_set_nav_button_active(save_nav_button, false)
+	_set_nav_button_active(load_nav_button, false)
+	_set_nav_button_active(settings_nav_button, false)
+	return true
 
 
 func _show_node(node_id: String) -> void:
+	_hide_keyword_action()
+	_cancel_keyword_connection_selection(false)
+
 	var node_data: Dictionary = loader.get_node(node_id)
 
 	if node_data.is_empty():
 		push_warning("MainUI: node not found: " + node_id)
 		return
 
+	_stop_audio_for_context_change()
 	var autosave: bool = bool(node_data.get("autosave", false))
 	runtime_state.set_current_node(node_id, autosave)
 	_render_node(node_data)
+
+	if autosave and not _suppress_disk_autosave:
+		_write_disk_autosave(node_data)
 
 	if story_scroll != null:
 		story_scroll.scroll_vertical = 0
@@ -552,10 +951,7 @@ func _render_node(node_data: Dictionary) -> void:
 	chapter_intro_label.text = loader.get_chapter_intro()
 	target_text_label.text = loader.get_current_goal()
 
-	_clear_children(keyword_grid)
-
-	for keyword in loader.get_discovered_keywords():
-		keyword_grid.add_child(_keyword_tag(str(keyword)))
+	_refresh_keyword_grid()
 
 	_set_framed_label_text(node_type_label, str(node_data.get("node_type", "事件节点")))
 	story_title_label.text = str(node_data.get("title", ""))
@@ -565,8 +961,9 @@ func _render_node(node_data: Dictionary) -> void:
 	_render_story_body(node_data)
 	_render_choices(node_data)
 	_render_right_panel(node_data)
+	_render_graph_view()
 
-	call_deferred("_apply_story_scrollbar_style")
+	call_deferred("_apply_scrollbar_styles")
 
 
 func _render_story_body(node_data: Dictionary) -> void:
@@ -586,6 +983,142 @@ func _render_story_body(node_data: Dictionary) -> void:
 	var quote_text: String = str(node_data.get("quote", ""))
 	quote_panel.visible = quote_text != ""
 	quote_label.text = quote_text
+
+
+func _on_story_body_gui_input(event: InputEvent) -> void:
+	if not (event is InputEventMouseButton):
+		return
+
+	var mouse_event: InputEventMouseButton = event as InputEventMouseButton
+
+	if mouse_event.button_index != MOUSE_BUTTON_LEFT or mouse_event.pressed:
+		return
+
+	call_deferred(
+		"_update_keyword_action_from_selection",
+		get_viewport().get_mouse_position(),
+		runtime_state.current_node_id
+	)
+
+
+func _update_keyword_action_from_selection(mouse_position: Vector2, source_node_id: String) -> void:
+	if not story_view.visible or source_node_id != runtime_state.current_node_id:
+		_hide_keyword_action()
+		return
+
+	var selected_text: String = story_body_label.get_selected_text()
+	var normalized_text: String = runtime_state.normalize_keyword_text(selected_text)
+
+	if normalized_text == "":
+		_hide_keyword_action()
+		return
+
+	_pending_keyword_text = selected_text
+	_pending_keyword_source_node_id = source_node_id
+	_keyword_feedback_generation += 1
+	_position_keyword_action(mouse_position)
+	keyword_action_panel.visible = true
+
+	if normalized_text.length() > CaseRuntimeState.MAX_KEYWORD_LENGTH:
+		_show_keyword_feedback("关键词不能超过 10 个字")
+		return
+
+	keyword_action_button.text = "提取为关键词"
+	keyword_action_button.disabled = false
+
+
+func _position_keyword_action(mouse_position: Vector2) -> void:
+	var viewport_size: Vector2 = get_viewport_rect().size
+	var panel_size: Vector2 = KEYWORD_ACTION_SIZE
+	var target_position := mouse_position + Vector2(12.0, 12.0)
+
+	if target_position.y + panel_size.y > viewport_size.y - 8.0:
+		target_position.y = mouse_position.y - panel_size.y - 12.0
+
+	target_position.x = clampf(target_position.x, 8.0, viewport_size.x - panel_size.x - 8.0)
+	target_position.y = clampf(
+		target_position.y,
+		float(TOP_BAR_HEIGHT) + 8.0,
+		viewport_size.y - panel_size.y - 8.0
+	)
+	keyword_action_panel.position = target_position
+
+
+func _on_extract_keyword_pressed() -> void:
+	if _pending_keyword_text.strip_edges() == "" or _pending_keyword_source_node_id == "":
+		_hide_keyword_action()
+		return
+
+	var normalized_text: String = runtime_state.normalize_keyword_text(_pending_keyword_text)
+
+	if normalized_text.length() > CaseRuntimeState.MAX_KEYWORD_LENGTH:
+		_show_keyword_feedback("关键词不能超过 10 个字")
+		return
+
+	var result: Dictionary = runtime_state.add_keyword(
+		_pending_keyword_text,
+		_pending_keyword_source_node_id
+	)
+	var added: bool = bool(result.get("added", false))
+
+	if added:
+		_refresh_keyword_grid()
+		_render_graph_view()
+		_show_keyword_feedback("已提取关键词")
+		return
+
+	if str(result.get("reason", "")) == "duplicate":
+		_show_keyword_feedback("关键词已提取")
+		return
+
+	if str(result.get("reason", "")) == "too_long":
+		_show_keyword_feedback("关键词不能超过 10 个字")
+		return
+
+	_hide_keyword_action()
+
+
+func _show_keyword_feedback(text: String) -> void:
+	_keyword_feedback_generation += 1
+	var feedback_generation: int = _keyword_feedback_generation
+	keyword_action_button.text = text
+	keyword_action_button.disabled = true
+	await get_tree().create_timer(0.9).timeout
+
+	if feedback_generation == _keyword_feedback_generation:
+		_hide_keyword_action()
+
+
+func _hide_keyword_action() -> void:
+	_keyword_feedback_generation += 1
+	_pending_keyword_text = ""
+	_pending_keyword_source_node_id = ""
+
+	if keyword_action_panel != null:
+		keyword_action_panel.visible = false
+
+	if story_body_label != null:
+		story_body_label.deselect()
+
+
+func _refresh_keyword_grid() -> void:
+	_clear_children(keyword_grid)
+
+	var displayed_texts: Dictionary = {}
+
+	for keyword in loader.get_discovered_keywords():
+		var text: String = str(keyword)
+
+		if text != "" and not displayed_texts.has(text):
+			displayed_texts[text] = true
+			keyword_grid.add_child(_keyword_tag(text))
+
+	for text in runtime_state.get_discovered_keyword_texts():
+		if text != "" and not displayed_texts.has(text):
+			displayed_texts[text] = true
+			keyword_grid.add_child(_keyword_tag(text))
+
+	call_deferred("_update_keyword_tag_widths")
 
 
 func _render_choices(node_data: Dictionary) -> void:
@@ -655,18 +1188,616 @@ func _render_right_panel(node_data: Dictionary) -> void:
 	attr_autosave_value.text = "%s / %s" % [autosave_text, safe_id]
 
 
-func _render_audio_cards(node_data: Dictionary) -> void:
-	_clear_children(audio_slot)
-
-	var audio_clues: Variant = node_data.get("audio_clues", [])
-	var node_type: String = str(node_data.get("node_type", ""))
-	var has_audio: bool = (audio_clues is Array and not audio_clues.is_empty()) or node_type.contains("音频")
-
-	if not has_audio:
+func _render_graph_view() -> void:
+	if graph_canvas == null:
 		return
 
+	_clear_children(graph_canvas)
+	_keyword_graph_layout.clear()
+
+	var canvas_size: Vector2 = loader.get_graph_canvas_size()
+
+	if canvas_size.x <= 0.0 or canvas_size.y <= 0.0:
+		var empty_edges: Array[Dictionary] = []
+		graph_canvas.configure(Vector2(960.0, 640.0), empty_edges, C_LINE)
+		var warning_label := _label("图谱布局不可用", 18, C_SUBTEXT, FONT_SERIF_REGULAR)
+		warning_label.position = Vector2(32.0, 32.0)
+		graph_canvas.add_child(warning_label)
+		return
+
+	var visible_nodes: Dictionary = _get_visible_graph_nodes()
+	var edges: Array[Dictionary] = []
+
+	for source_value in visible_nodes.keys():
+		var source_id: String = str(source_value)
+
+		if not runtime_state.unlocked_nodes.has(source_id):
+			continue
+
+		var source_data: Dictionary = loader.get_node(source_id)
+		var source_position: Vector2 = loader.get_graph_node_position(source_id)
+
+		if source_data.is_empty() or source_position.x < 0.0 or source_position.y < 0.0:
+			continue
+
+		var choices: Variant = source_data.get("choices", [])
+
+		if not (choices is Array):
+			continue
+
+		for choice in choices:
+			if not (choice is Dictionary):
+				continue
+
+			var target_id: String = str(choice.get("to", ""))
+
+			if target_id == "" or not visible_nodes.has(target_id):
+				continue
+
+			var target_position: Vector2 = loader.get_graph_node_position(target_id)
+
+			if target_position.x < 0.0 or target_position.y < 0.0:
+				continue
+
+			edges.append({
+				"from": source_position + GRAPH_NODE_SIZE * 0.5,
+				"to": target_position + GRAPH_NODE_SIZE * 0.5
+			})
+
+	_keyword_graph_layout = _calculate_keyword_graph_layout(visible_nodes, canvas_size)
+	var keyword_edges: Array[Dictionary] = _build_keyword_connection_edges(visible_nodes)
+	graph_canvas.configure(canvas_size, edges, C_LINE, keyword_edges, C_BLUE)
+
+	for node_value in visible_nodes.keys():
+		var node_id: String = str(node_value)
+		var node_data: Dictionary = loader.get_node(node_id)
+		var node_position: Vector2 = loader.get_graph_node_position(node_id)
+
+		if node_data.is_empty():
+			push_warning("MainUI: graph references missing node: " + node_id)
+			continue
+
+		if node_position.x < 0.0 or node_position.y < 0.0:
+			push_warning("MainUI: graph layout position missing for node: " + node_id)
+			continue
+
+		var visited: bool = runtime_state.unlocked_nodes.has(node_id)
+		var current: bool = node_id == runtime_state.current_node_id
+		var keyword_unlocked: bool = runtime_state.is_keyword_unlocked(node_id)
+		graph_canvas.add_child(_graph_node_card(
+			node_data,
+			node_position,
+			visited,
+			current,
+			keyword_unlocked
+		))
+
+	for layout_value in _keyword_graph_layout.values():
+		if not (layout_value is Dictionary):
+			continue
+
+		var layout: Dictionary = layout_value
+		graph_canvas.add_child(_keyword_graph_node(
+			layout.get("instance", {}),
+			layout.get("position", Vector2.ZERO),
+			layout.get("size", KEYWORD_GRAPH_MIN_SIZE)
+		))
+
+
+func _get_visible_graph_nodes() -> Dictionary:
+	var visible_nodes: Dictionary = {}
+
+	for node_id in runtime_state.unlocked_nodes.keys():
+		visible_nodes[str(node_id)] = true
+
+	for node_id in runtime_state.get_keyword_unlocked_node_ids():
+		if not loader.get_node(node_id).is_empty():
+			visible_nodes[node_id] = true
+
+	for connection in runtime_state.get_keyword_connections():
+		var connected_target_id: String = str(connection.get("target_node_id", ""))
+
+		if connected_target_id != "" and not loader.get_node(connected_target_id).is_empty():
+			visible_nodes[connected_target_id] = true
+
+	var current_data: Dictionary = loader.get_node(runtime_state.current_node_id)
+	var choices: Variant = current_data.get("choices", [])
+
+	if choices is Array:
+		for choice in choices:
+			if not (choice is Dictionary):
+				continue
+
+			var target_id: String = str(choice.get("to", ""))
+
+			if target_id != "" and not loader.get_node(target_id).is_empty():
+				visible_nodes[target_id] = true
+
+	return visible_nodes
+
+
+func _calculate_keyword_graph_layout(
+	visible_nodes: Dictionary,
+	canvas_size: Vector2
+) -> Dictionary:
+	var layout_by_instance: Dictionary = {}
+	var source_keyword_counts: Dictionary = {}
+
+	for keyword_instance in runtime_state.get_keyword_instances():
+		var source_node_id: String = str(keyword_instance.get("source_node_id", ""))
+		var instance_id: String = str(keyword_instance.get("instance_id", ""))
+
+		if source_node_id == "" or instance_id == "" or not visible_nodes.has(source_node_id):
+			continue
+
+		var source_position: Vector2 = loader.get_graph_node_position(source_node_id)
+
+		if source_position.x < 0.0 or source_position.y < 0.0:
+			continue
+
+		var keyword_index: int = int(source_keyword_counts.get(source_node_id, 0))
+		source_keyword_counts[source_node_id] = keyword_index + 1
+		var keyword_text: String = str(keyword_instance.get("text", ""))
+		var keyword_size := Vector2(
+			clampf(74.0 + float(keyword_text.length()) * 14.0, KEYWORD_GRAPH_MIN_SIZE.x, KEYWORD_GRAPH_MAX_WIDTH),
+			KEYWORD_GRAPH_MIN_SIZE.y
+		)
+		var keyword_position := Vector2(
+			source_position.x + GRAPH_NODE_SIZE.x + KEYWORD_GRAPH_OFFSET,
+			source_position.y + 8.0 + float(keyword_index) * (keyword_size.y + KEYWORD_GRAPH_GAP)
+		)
+
+		if keyword_position.x + keyword_size.x > canvas_size.x - 16.0:
+			keyword_position.x = source_position.x - KEYWORD_GRAPH_OFFSET - keyword_size.x
+
+		keyword_position.x = maxf(16.0, keyword_position.x)
+		layout_by_instance[instance_id] = {
+			"instance": keyword_instance,
+			"position": keyword_position,
+			"size": keyword_size
+		}
+
+	return layout_by_instance
+
+
+func _build_keyword_connection_edges(visible_nodes: Dictionary) -> Array[Dictionary]:
+	var edges: Array[Dictionary] = []
+
+	for connection in runtime_state.get_keyword_connections():
+		if str(connection.get("outcome", "")) != "correct":
+			continue
+
+		var instance_id: String = str(connection.get("keyword_instance_id", ""))
+		var target_node_id: String = str(connection.get("target_node_id", ""))
+
+		if not _keyword_graph_layout.has(instance_id) or not visible_nodes.has(target_node_id):
+			continue
+
+		var layout_value: Variant = _keyword_graph_layout[instance_id]
+
+		if not (layout_value is Dictionary):
+			continue
+
+		var target_position: Vector2 = loader.get_graph_node_position(target_node_id)
+
+		if target_position.x < 0.0 or target_position.y < 0.0:
+			continue
+
+		var layout: Dictionary = layout_value
+		var keyword_position: Vector2 = layout.get("position", Vector2.ZERO)
+		var keyword_size: Vector2 = layout.get("size", KEYWORD_GRAPH_MIN_SIZE)
+		edges.append({
+			"from": keyword_position + keyword_size * 0.5,
+			"to": target_position + GRAPH_NODE_SIZE * 0.5
+		})
+
+	return edges
+
+
+func _keyword_graph_node(keyword_instance: Dictionary, position_value: Vector2, node_size: Vector2) -> Control:
+	var keyword_text: String = str(keyword_instance.get("text", ""))
+	var instance_id: String = str(keyword_instance.get("instance_id", "keyword"))
+	var selected: bool = instance_id == _selected_keyword_instance_id
+	var connected: bool = not runtime_state.get_keyword_connections_for_keyword(instance_id).is_empty()
+	var bg_color: Color = C_BLUE if selected else Color("#F4F7FF")
+	var text_color: Color = C_WHITE if selected else C_BLUE
+	var border_width: int = 2 if connected and not selected else 1
+	var card := Control.new()
+	card.name = "GraphKeyword_" + instance_id
+	card.position = position_value
+	card.size = node_size
+	card.custom_minimum_size = node_size
+	card.set_meta("graph_keyword_card", true)
+	card.set_meta("keyword_instance_id", instance_id)
+	card.set_meta("keyword_connected", connected)
+	card.tooltip_text = keyword_text
+
+	var panel := PanelContainer.new()
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_theme_stylebox_override("panel", _style_box(bg_color, C_BLUE, border_width, 3))
+	_fill_rect(panel)
+	card.add_child(panel)
+
+	var margin := MarginContainer.new()
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	margin.add_theme_constant_override("margin_left", 9)
+	margin.add_theme_constant_override("margin_right", 9)
+	margin.add_theme_constant_override("margin_top", 4)
+	margin.add_theme_constant_override("margin_bottom", 4)
+	panel.add_child(margin)
+
+	var row := HBoxContainer.new()
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_theme_constant_override("separation", 6)
+	margin.add_child(row)
+
+	var diamond := _label("◇", 15, text_color, FONT_MONO_MEDIUM)
+	diamond.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	diamond.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	row.add_child(diamond)
+
+	if connected:
+		var connected_dot := _label("●", 9, text_color, FONT_MONO_MEDIUM)
+		connected_dot.name = "ConnectedDot"
+		connected_dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		connected_dot.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		connected_dot.tooltip_text = "已连接"
+		row.add_child(connected_dot)
+
+	var text_label := _label(keyword_text, 14, text_color, FONT_SERIF_REGULAR)
+	text_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	text_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	text_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	text_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	text_label.tooltip_text = keyword_text
+	row.add_child(text_label)
+
+	var hit_button := _transparent_hit_button()
+	hit_button.tooltip_text = keyword_text
+	hit_button.pressed.connect(_on_graph_keyword_pressed.bind(instance_id))
+	card.add_child(hit_button)
+	return card
+
+
+func _graph_node_card(
+	node_data: Dictionary,
+	position_value: Vector2,
+	visited: bool,
+	current: bool,
+	keyword_unlocked: bool
+) -> Control:
+	var node_id: String = str(node_data.get("node_id", ""))
+	var icon_key: String = str(node_data.get("icon_key", ""))
+	var node_type: String = str(node_data.get("node_type", ""))
+	var is_error: bool = icon_key == "false" or node_type.contains("错误解释")
+	var is_failure: bool = icon_key == "fatal" or node_type.contains("失败")
+
+	var bg_color: Color = Color("#E8F0FF")
+	var border_color: Color = C_LINE
+	var text_color: Color = C_SUBTEXT
+	var border_width: int = 1
+	var state_text := "可调查"
+
+	if visited:
+		bg_color = C_WHITE
+		border_color = C_MUTED if is_error else C_BLUE
+		text_color = C_SUBTEXT if is_error else C_BLUE
+		state_text = "已访问"
+	elif keyword_unlocked:
+		bg_color = Color("#E8F0FF")
+		border_color = C_BLUE
+		text_color = C_BLUE
+		state_text = "已解锁"
+
+	if current:
+		bg_color = C_BLUE_DARK
+		border_color = C_BLUE_DARK
+		text_color = C_WHITE
+		state_text = "当前节点"
+
+	if is_failure:
+		border_color = C_BLUE_DARK
+		border_width = 1
+
+	var card := Control.new()
+	card.name = "GraphNode_" + node_id
+	card.set_meta("graph_node_card", true)
+	card.set_meta("graph_node_id", node_id)
+	card.position = position_value
+	card.size = GRAPH_NODE_SIZE
+	card.custom_minimum_size = GRAPH_NODE_SIZE
+
+	var panel := PanelContainer.new()
+	panel.add_theme_stylebox_override("panel", _style_box(bg_color, border_color, border_width, 5))
+	_fill_rect(panel)
+	card.add_child(panel)
+
+	var margin := MarginContainer.new()
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	margin.add_theme_constant_override("margin_left", 16)
+	margin.add_theme_constant_override("margin_right", 16)
+	margin.add_theme_constant_override("margin_top", 10)
+	margin.add_theme_constant_override("margin_bottom", 9)
+	_fill_rect(margin)
+	card.add_child(margin)
+
+	var content := VBoxContainer.new()
+	content.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	content.add_theme_constant_override("separation", 3)
+	margin.add_child(content)
+
+	var title := _label(str(node_data.get("title", node_id)), 17, text_color, FONT_SERIF_SEMIBOLD)
+	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	title.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	content.add_child(title)
+
+	if is_failure:
+		var failure_title_strike := Line2D.new()
+		failure_title_strike.name = "FailureTitleStrike"
+		failure_title_strike.width = 2.0
+		failure_title_strike.antialiased = true
+		failure_title_strike.z_index = 2
+		var strike_color := C_BLUE_DARK
+		strike_color.a = 0.7
+		failure_title_strike.default_color = strike_color
+		title.add_child(failure_title_strike)
+		title.resized.connect(_update_failure_title_strike.bind(title, failure_title_strike))
+		_update_failure_title_strike(title, failure_title_strike)
+
+	var meta_row := HBoxContainer.new()
+	meta_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	content.add_child(meta_row)
+
+	var id_label := _label(node_id, 12, text_color, FONT_MONO_REGULAR)
+	id_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	meta_row.add_child(id_label)
+
+	var spacer := Control.new()
+	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	meta_row.add_child(spacer)
+
+	var state_label := _label(state_text, 12, text_color, FONT_SERIF_REGULAR)
+	state_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	meta_row.add_child(state_label)
+
+	var hit_button := _transparent_hit_button()
+	hit_button.pressed.connect(_on_graph_node_pressed.bind(node_id))
+
+	card.add_child(hit_button)
+	return card
+
+
+func _update_failure_title_strike(title_label: Label, strike_line: Line2D) -> void:
+	var font: Font = title_label.get_theme_font("font")
+	var font_size: int = title_label.get_theme_font_size("font_size")
+	var measured_width: float = font.get_string_size(
+		title_label.text,
+		HORIZONTAL_ALIGNMENT_LEFT,
+		-1.0,
+		font_size
+	).x
+	var visible_width: float = minf(measured_width, title_label.size.x)
+	var strike_y: float = title_label.size.y * 0.52
+	strike_line.points = PackedVector2Array([
+		Vector2(0.0, strike_y),
+		Vector2(maxf(0.0, visible_width), strike_y)
+	])
+
+
+func _on_graph_node_pressed(node_id: String) -> void:
+	if _selected_keyword_instance_id != "":
+		_complete_keyword_connection(node_id)
+		return
+
+	if (
+		not runtime_state.unlocked_nodes.has(node_id)
+		and not runtime_state.is_keyword_unlocked(node_id)
+	):
+		return
+
+	_show_node(node_id)
+	_show_story_view()
+
+
+func _on_graph_keyword_pressed(instance_id: String) -> void:
+	var instance: Dictionary = runtime_state.get_keyword_instance(instance_id)
+
+	if instance.is_empty():
+		push_warning("MainUI: graph keyword instance not found: " + instance_id)
+		return
+
+	_selected_keyword_instance_id = instance_id
+	_render_graph_view()
+	_show_graph_status(
+		"已选择关键词：%s\n请选择要连接的剧情节点\nEsc 取消" % str(instance.get("text", "")),
+		true
+	)
+
+
+func _complete_keyword_connection(target_node_id: String) -> void:
+	var instance_id: String = _selected_keyword_instance_id
+	var instance: Dictionary = runtime_state.get_keyword_instance(instance_id)
+	_selected_keyword_instance_id = ""
+
+	if instance.is_empty():
+		_render_graph_view()
+		_show_graph_status("连接无效", false)
+		return
+
+	var normalized_keyword: String = str(instance.get("normalized_text", ""))
+	var source_node_id: String = str(instance.get("source_node_id", ""))
+	var rule: Dictionary = loader.find_keyword_rule(
+		normalized_keyword,
+		source_node_id,
+		target_node_id
+	)
+
+	if rule.is_empty():
+		_render_graph_view()
+		_show_graph_status("连接无效", false)
+		return
+
+	var outcome: String = str(rule.get("outcome", "")).to_lower()
+
+	if outcome == "correct":
+		var connection_result: Dictionary = runtime_state.add_keyword_connection(
+			instance_id,
+			target_node_id,
+			rule
+		)
+
+		if not bool(connection_result.get("added", false)):
+			_render_graph_view()
+
+			if str(connection_result.get("reason", "")) == "duplicate":
+				_show_graph_status("该连接已经存在", false)
+			else:
+				_show_graph_status("连接无效", false)
+
+			return
+
+		var unlock_node_id: String = str(rule.get("unlock_node_id", ""))
+		var unlocked_new_node: bool = false
+
+		if unlock_node_id != "":
+			if loader.get_node(unlock_node_id).is_empty():
+				push_warning("MainUI: keyword rule unlock node not found: " + unlock_node_id)
+			else:
+				unlocked_new_node = runtime_state.unlock_node_from_keyword(unlock_node_id)
+
+		_refresh_graph_after_keyword_result()
+		var success_text: String = "连接成立，已解锁新节点" if unlocked_new_node else "连接成立"
+		var feedback: String = str(rule.get("feedback", ""))
+
+		if feedback != "":
+			success_text += "\n" + feedback
+
+		_show_graph_status(success_text, false)
+		return
+
+	if outcome == "error" or outcome == "incorrect" or outcome == "wrong":
+		var error_node_id: String = str(rule.get("error_node_id", ""))
+
+		if error_node_id != "":
+			if loader.get_node(error_node_id).is_empty():
+				push_warning("MainUI: keyword rule error node not found: " + error_node_id)
+			else:
+				runtime_state.unlock_node_from_keyword(error_node_id)
+
+		_refresh_graph_after_keyword_result()
+		var error_feedback: String = str(rule.get("feedback", ""))
+		_show_graph_status(
+			error_feedback if error_feedback != "" else "连接不成立",
+			false
+		)
+		return
+
+	push_warning("MainUI: unsupported keyword rule outcome: " + outcome)
+	_render_graph_view()
+	_show_graph_status("连接无效", false)
+
+
+func _refresh_graph_after_keyword_result() -> void:
+	_render_graph_view()
+	var current_data: Dictionary = loader.get_node(runtime_state.current_node_id)
+
+	if not current_data.is_empty():
+		_render_right_panel(current_data)
+
+
+func _cancel_keyword_connection_selection(refresh_graph: bool) -> void:
+	var had_selection: bool = _selected_keyword_instance_id != ""
+	_selected_keyword_instance_id = ""
+	_graph_feedback_generation += 1
+
+	if graph_status_panel != null:
+		graph_status_panel.visible = false
+
+	if had_selection and refresh_graph and graph_view != null and graph_view.visible:
+		_render_graph_view()
+
+
+func _show_graph_status(text: String, persistent: bool) -> void:
+	if graph_status_panel == null or graph_status_label == null:
+		return
+
+	_graph_feedback_generation += 1
+	var feedback_generation: int = _graph_feedback_generation
+	graph_status_label.text = text
+	graph_status_panel.visible = true
+
+	if persistent:
+		return
+
+	await get_tree().create_timer(1.8).timeout
+
+	if (
+		feedback_generation == _graph_feedback_generation
+		and _selected_keyword_instance_id == ""
+	):
+		graph_status_panel.visible = false
+
+
+func _show_case_status(text: String) -> void:
+	if case_status_panel == null or case_status_label == null:
+		return
+
+	_case_status_generation += 1
+	var status_generation: int = _case_status_generation
+	case_status_label.text = text
+	case_status_panel.visible = true
+	await get_tree().create_timer(1.8).timeout
+
+	if status_generation == _case_status_generation:
+		case_status_panel.visible = false
+
+
+func _render_audio_cards(node_data: Dictionary) -> void:
+	_clear_children(audio_slot)
+	_audio_card_controls.clear()
+	_audio_finished_id = ""
+
+	var audio_clues: Variant = node_data.get("audio_clues", [])
+
+	if not (audio_clues is Array) or audio_clues.is_empty():
+		return
+
+	for audio_clue_value in audio_clues:
+		var audio_clue_id: String = str(audio_clue_value)
+		var clue_data: Dictionary = {}
+
+		if audio_manager != null:
+			var clue_variant: Variant = audio_manager.call("get_audio_clue", audio_clue_id)
+
+			if clue_variant is Dictionary:
+				clue_data = clue_variant
+
+		if clue_data.is_empty():
+			clue_data = {
+				"id": audio_clue_id,
+				"title": "音频线索"
+			}
+			push_warning("MainUI: audio clue data not found: " + audio_clue_id)
+
+		_build_audio_card(clue_data, str(node_data.get("node_id", "")))
+
+
+func _build_audio_card(clue_data: Dictionary, source_node_id: String) -> void:
+	var audio_clue_id: String = str(clue_data.get("id", ""))
+	var available: bool = false
+	var duration: float = 0.0
+
+	if audio_manager != null and audio_clue_id != "":
+		available = bool(audio_manager.call("is_audio_available", audio_clue_id))
+
+		if available:
+			duration = float(audio_manager.call("get_audio_duration", audio_clue_id))
+
 	var card := PanelContainer.new()
-	card.custom_minimum_size = Vector2(STORY_CONTENT_WIDTH, 174)
+	card.custom_minimum_size = Vector2(STORY_CONTENT_WIDTH, 226)
 	card.add_theme_stylebox_override("panel", _style_box(Color.TRANSPARENT, C_BLUE, 1, 4))
 	audio_slot.add_child(card)
 
@@ -685,28 +1816,297 @@ func _render_audio_cards(node_data: Dictionary) -> void:
 	top_row.add_theme_constant_override("separation", 10)
 	box.add_child(top_row)
 
-	var title := _label("音频线索 / AUDIO EVIDENCE", 15, C_BLUE, FONT_SERIF_SEMIBOLD)
+	var title := _label(str(clue_data.get("title", "音频线索")), 18, C_BLUE, FONT_SERIF_SEMIBOLD)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top_row.add_child(title)
 
-	var audio_id := _label(_first_array_value(audio_clues, "未编号"), 13, C_SUBTEXT, FONT_MONO_REGULAR)
-	top_row.add_child(audio_id)
+	var resource_status: String = "资源可用" if available else "音频资源暂不可用"
+	var audio_id_label := _label(
+		"%s / %s" % [audio_clue_id, resource_status],
+		13,
+		C_SUBTEXT,
+		FONT_MONO_REGULAR
+	)
+	top_row.add_child(audio_id_label)
+
+	var control_row := HBoxContainer.new()
+	control_row.add_theme_constant_override("separation", 12)
+	box.add_child(control_row)
+
+	var play_button := _audio_action_button("播放")
+	play_button.disabled = not available
+	play_button.pressed.connect(_on_audio_play_pressed.bind(audio_clue_id))
+	control_row.add_child(play_button)
 
 	var waveform: Control = AudioWaveformPlaceholder.new()
 	waveform.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	box.add_child(waveform)
+	waveform.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	var waveform_frame := PanelContainer.new()
+	waveform_frame.custom_minimum_size.y = 104
+	waveform_frame.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	waveform_frame.add_theme_stylebox_override("panel", _style_box(C_PANEL_SOFT, C_DIVIDER, 1, 3))
+	control_row.add_child(waveform_frame)
+
+	var waveform_margin := MarginContainer.new()
+	waveform_margin.add_theme_constant_override("margin_left", 4)
+	waveform_margin.add_theme_constant_override("margin_right", 4)
+	waveform_margin.add_theme_constant_override("margin_top", 2)
+	waveform_margin.add_theme_constant_override("margin_bottom", 2)
+	waveform_frame.add_child(waveform_margin)
+	waveform_margin.add_child(waveform)
+
+	var marker_button := _audio_action_button("标记")
+	marker_button.disabled = not available
+	marker_button.pressed.connect(
+		_on_audio_marker_pressed.bind(audio_clue_id, source_node_id)
+	)
+	control_row.add_child(marker_button)
 
 	var bottom_row := HBoxContainer.new()
 	bottom_row.add_theme_constant_override("separation", 12)
 	box.add_child(bottom_row)
 
-	var play_button := _audio_control_button("▶")
-	play_button.disabled = true
-	bottom_row.add_child(play_button)
-
-	var time_label := _label("音频播放暂未接入", 14, C_SUBTEXT, FONT_SERIF_REGULAR)
+	var time_text: String = "00:00 / %s" % _format_audio_time(duration) if available else "--:-- / --:--"
+	var time_label := _label(time_text, 14, C_SUBTEXT, FONT_MONO_REGULAR)
 	time_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	bottom_row.add_child(time_label)
+
+	var feedback_label := _label("", 14, C_BLUE, FONT_SERIF_SEMIBOLD)
+	feedback_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	feedback_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	feedback_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	bottom_row.add_child(feedback_label)
+
+	_audio_card_controls[audio_clue_id] = {
+		"available": available,
+		"duration": duration,
+		"play_button": play_button,
+		"marker_button": marker_button,
+		"time_label": time_label,
+		"feedback_label": feedback_label,
+		"waveform": waveform
+	}
+	_refresh_audio_markers(audio_clue_id)
+
+
+func _on_audio_play_pressed(audio_clue_id: String) -> void:
+	if audio_manager == null or not _audio_card_controls.has(audio_clue_id):
+		return
+
+	var controls: Dictionary = _audio_card_controls[audio_clue_id]
+
+	if not bool(controls.get("available", false)):
+		_show_audio_feedback(audio_clue_id, "音频资源暂不可用")
+		return
+
+	var current_audio_id: String = str(audio_manager.call("get_current_audio_id"))
+	var playing: bool = bool(audio_manager.call("is_playing"))
+	var paused: bool = bool(audio_manager.call("is_paused"))
+
+	if current_audio_id == audio_clue_id and playing:
+		audio_manager.call("pause_audio")
+		return
+
+	if current_audio_id == audio_clue_id and paused:
+		audio_manager.call("resume_audio")
+		return
+
+	if not bool(audio_manager.call("play_audio", audio_clue_id)):
+		_show_audio_feedback(audio_clue_id, "音频资源暂不可用")
+
+
+func _on_audio_marker_pressed(audio_clue_id: String, source_node_id: String) -> void:
+	if audio_manager == null or not _audio_card_controls.has(audio_clue_id):
+		return
+
+	var controls: Dictionary = _audio_card_controls[audio_clue_id]
+
+	if not bool(controls.get("available", false)):
+		_show_audio_feedback(audio_clue_id, "音频资源暂不可用")
+		return
+
+	if str(audio_manager.call("get_current_audio_id")) != audio_clue_id:
+		if not bool(audio_manager.call("prepare_audio", audio_clue_id)):
+			_show_audio_feedback(audio_clue_id, "音频资源暂不可用")
+			return
+
+	var position: float = float(audio_manager.call("get_playback_position"))
+	var label: String = _format_audio_time(position)
+	var result: Dictionary = runtime_state.add_audio_marker(
+		audio_clue_id,
+		source_node_id,
+		position,
+		label
+	)
+
+	if bool(result.get("added", false)):
+		_refresh_audio_markers(audio_clue_id)
+		_show_audio_feedback(audio_clue_id, "已标记 " + label)
+	else:
+		_show_audio_feedback(audio_clue_id, "该时间已标记")
+
+
+func _on_audio_started(audio_clue_id: String) -> void:
+	_audio_finished_id = ""
+	_refresh_audio_button_states(audio_clue_id)
+
+
+func _on_audio_paused(audio_clue_id: String) -> void:
+	_refresh_audio_button_states(audio_clue_id)
+
+
+func _on_audio_stopped(audio_clue_id: String) -> void:
+	_audio_finished_id = ""
+	_update_audio_card_progress(audio_clue_id, 0.0, _get_audio_card_duration(audio_clue_id))
+	_refresh_audio_button_states(audio_clue_id)
+
+
+func _on_audio_finished(audio_clue_id: String) -> void:
+	_audio_finished_id = audio_clue_id
+	_update_audio_card_progress(audio_clue_id, 0.0, _get_audio_card_duration(audio_clue_id))
+	_refresh_audio_button_states(audio_clue_id)
+
+
+func _on_audio_progress_changed(audio_clue_id: String, position: float, duration: float) -> void:
+	_update_audio_card_progress(audio_clue_id, position, duration)
+
+
+func _refresh_audio_progress_display() -> void:
+	if (
+		audio_manager == null
+		or story_view == null
+		or not story_view.visible
+		or _audio_card_controls.is_empty()
+	):
+		return
+
+	var audio_clue_id: String = str(audio_manager.call("get_current_audio_id"))
+
+	if audio_clue_id == "" or not _audio_card_controls.has(audio_clue_id):
+		return
+
+	_update_audio_card_progress(
+		audio_clue_id,
+		float(audio_manager.call("get_playback_position")),
+		float(audio_manager.call("get_loaded_duration"))
+	)
+
+
+func _update_audio_card_progress(audio_clue_id: String, position: float, duration: float) -> void:
+	if not _audio_card_controls.has(audio_clue_id):
+		return
+
+	var controls: Dictionary = _audio_card_controls[audio_clue_id]
+	var time_label: Label = controls.get("time_label") as Label
+	var waveform: Control = controls.get("waveform") as Control
+	var safe_duration: float = maxf(0.0, duration)
+	var safe_position: float = clampf(position, 0.0, safe_duration) if safe_duration > 0.0 else 0.0
+	var progress_ratio: float = safe_position / safe_duration if safe_duration > 0.0 else 0.0
+
+	if time_label != null:
+		time_label.text = "%s / %s" % [
+			_format_audio_time(safe_position),
+			_format_audio_time(safe_duration)
+		]
+
+	if waveform != null:
+		waveform.call("set_progress_ratio", clampf(progress_ratio, 0.0, 1.0))
+
+
+func _refresh_audio_button_states(_changed_audio_id: String = "") -> void:
+	if audio_manager == null:
+		return
+
+	var current_audio_id: String = str(audio_manager.call("get_current_audio_id"))
+	var playing: bool = bool(audio_manager.call("is_playing"))
+	var paused: bool = bool(audio_manager.call("is_paused"))
+
+	for audio_clue_value in _audio_card_controls.keys():
+		var audio_clue_id: String = str(audio_clue_value)
+		var controls: Dictionary = _audio_card_controls[audio_clue_id]
+		var play_button: Button = controls.get("play_button") as Button
+
+		if play_button == null or not bool(controls.get("available", false)):
+			continue
+
+		if audio_clue_id == current_audio_id and playing:
+			play_button.text = "暂停"
+		elif audio_clue_id == current_audio_id and paused:
+			play_button.text = "继续"
+		elif audio_clue_id == _audio_finished_id:
+			play_button.text = "重播"
+		else:
+			play_button.text = "播放"
+
+
+func _refresh_audio_markers(audio_clue_id: String) -> void:
+	if not _audio_card_controls.has(audio_clue_id):
+		return
+
+	var controls: Dictionary = _audio_card_controls[audio_clue_id]
+	var waveform: Control = controls.get("waveform") as Control
+	var duration: float = float(controls.get("duration", 0.0))
+	var marker_ratios := PackedFloat32Array()
+
+	if duration > 0.0:
+		for marker in runtime_state.get_audio_markers_for_clue(audio_clue_id):
+			var marker_time: float = float(marker.get("time_seconds", 0.0))
+			marker_ratios.append(clampf(marker_time / duration, 0.0, 1.0))
+
+	if waveform != null:
+		waveform.call("set_marker_ratios", marker_ratios)
+
+
+func _show_audio_feedback(audio_clue_id: String, text: String) -> void:
+	if not _audio_card_controls.has(audio_clue_id):
+		return
+
+	var controls: Dictionary = _audio_card_controls[audio_clue_id]
+	var feedback_label: Label = controls.get("feedback_label") as Label
+
+	if feedback_label == null:
+		return
+
+	_audio_feedback_generation += 1
+	var feedback_generation: int = _audio_feedback_generation
+	feedback_label.text = text
+	await get_tree().create_timer(1.8).timeout
+
+	if feedback_generation == _audio_feedback_generation and is_instance_valid(feedback_label):
+		feedback_label.text = ""
+
+
+func _stop_audio_for_context_change() -> void:
+	if audio_manager == null:
+		return
+
+	if str(audio_manager.call("get_current_audio_id")) != "":
+		audio_manager.call("stop_audio")
+
+	_audio_finished_id = ""
+	_refresh_audio_button_states()
+
+
+func _get_audio_card_duration(audio_clue_id: String) -> float:
+	if not _audio_card_controls.has(audio_clue_id):
+		return 0.0
+
+	var controls: Dictionary = _audio_card_controls[audio_clue_id]
+	return float(controls.get("duration", 0.0))
+
+
+func _format_audio_time(time_seconds: float) -> String:
+	var safe_time: float = 0.0 if is_nan(time_seconds) or is_inf(time_seconds) else maxf(0.0, time_seconds)
+	var total_seconds: int = int(floor(safe_time))
+	var hours: int = total_seconds / 3600
+	var minutes: int = (total_seconds % 3600) / 60
+	var seconds: int = total_seconds % 60
+
+	if hours > 0:
+		return "%02d:%02d:%02d" % [hours, minutes, seconds]
+
+	return "%02d:%02d" % [minutes, seconds]
 
 
 func _render_image_cards(node_data: Dictionary) -> void:
@@ -816,7 +2216,7 @@ func _choice_description(choice: Dictionary) -> String:
 	var action: String = str(choice.get("action", ""))
 
 	if action == "play_audio":
-		return "播放当前节点登记的音频线索（功能占位）"
+		return "播放当前节点登记的音频线索"
 
 	if action == "load_last_safe_autosave":
 		return "返回进入错误或失败节点之前的最近安全节点"
@@ -980,12 +2380,35 @@ func _audio_control_button(text: String) -> Button:
 	return button
 
 
+func _audio_action_button(text: String) -> Button:
+	var button := Button.new()
+	button.text = text
+	button.custom_minimum_size = Vector2(72, 38)
+	button.focus_mode = Control.FOCUS_NONE
+	button.add_theme_font_override("font", FONT_SERIF_SEMIBOLD)
+	button.add_theme_font_size_override("font_size", 14)
+	button.add_theme_color_override("font_color", C_WHITE)
+	button.add_theme_color_override("font_hover_color", C_WHITE)
+	button.add_theme_color_override("font_pressed_color", C_WHITE)
+	button.add_theme_color_override("font_disabled_color", C_SUBTEXT)
+	button.add_theme_stylebox_override("normal", _style_box(C_BLUE, C_BLUE, 1, 4))
+	button.add_theme_stylebox_override("hover", _style_box(C_BLUE_DARK, C_BLUE_DARK, 1, 4))
+	button.add_theme_stylebox_override("pressed", _style_box(C_BLUE_DARK, C_BLUE_DARK, 1, 4))
+	button.add_theme_stylebox_override("disabled", _style_box(C_PANEL_SOFT, C_DIVIDER, 1, 4))
+	return button
+
+
 func _chapter_dropdown() -> OptionButton:
 	var btn := OptionButton.new()
 	btn.custom_minimum_size = Vector2(310, 38)
 	btn.add_theme_font_override("font", FONT_SERIF_SEMIBOLD)
 	btn.add_theme_font_size_override("font_size", 29)
 	btn.add_theme_color_override("font_color", C_BLUE)
+	btn.add_theme_color_override("font_hover_color", C_BLUE)
+	btn.add_theme_color_override("font_pressed_color", C_BLUE)
+	btn.add_theme_color_override("font_hover_pressed_color", C_BLUE)
+	btn.add_theme_color_override("font_focus_color", C_BLUE)
+	btn.add_theme_color_override("font_disabled_color", C_BLUE)
 	btn.add_theme_stylebox_override("normal", _style_box(Color.TRANSPARENT, Color.TRANSPARENT, 0, 0))
 	btn.add_theme_stylebox_override("hover", _style_box(Color.TRANSPARENT, Color.TRANSPARENT, 0, 0))
 	btn.add_theme_stylebox_override("pressed", _style_box(Color.TRANSPARENT, Color.TRANSPARENT, 0, 0))
@@ -1001,10 +2424,12 @@ func _chapter_dropdown() -> OptionButton:
 func _nav_button(texture: Texture2D, text: String, active: bool, scene_path: String = "") -> Control:
 	var root_control := Control.new()
 	root_control.custom_minimum_size = Vector2(128, 50)
+	root_control.set_meta("nav_active", active)
 
 	var panel := PanelContainer.new()
+	panel.name = "Panel"
 	_fill_rect(panel)
-	panel.add_theme_stylebox_override("panel", _style_box(C_BLUE_ACTIVE if active else Color.TRANSPARENT, C_BLUE_DARK if active else C_LINE, 1, 4))
+	panel.add_theme_stylebox_override("panel", _style_box(C_BLUE_ACTIVE if active else C_WHITE, C_BLUE_DARK if active else C_LINE, 1, 4))
 	root_control.add_child(panel)
 
 	var margin := MarginContainer.new()
@@ -1020,23 +2445,20 @@ func _nav_button(texture: Texture2D, text: String, active: bool, scene_path: Str
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	margin.add_child(row)
 
-	row.add_child(_icon(texture, Vector2(21, 21), C_WHITE if active else C_BLUE))
+	var nav_icon := _icon(texture, Vector2(21, 21), C_WHITE if active else C_BLUE)
+	nav_icon.name = "Icon"
+	row.add_child(nav_icon)
 
 	var label := _label(text, 16, C_WHITE if active else C_BLUE, FONT_SERIF_SEMIBOLD)
+	label.name = "Label"
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	row.add_child(label)
 
 	var hit_button := _transparent_hit_button()
-
-	if not active:
-		hit_button.mouse_entered.connect(func():
-			panel.add_theme_stylebox_override("panel", _style_box(C_PANEL_SOFT, C_BLUE, 1, 4))
-		)
-
-		hit_button.mouse_exited.connect(func():
-			panel.add_theme_stylebox_override("panel", _style_box(Color.TRANSPARENT, C_LINE, 1, 4))
-		)
+	hit_button.name = "HitButton"
+	hit_button.mouse_entered.connect(_on_nav_button_hovered.bind(root_control, true))
+	hit_button.mouse_exited.connect(_on_nav_button_hovered.bind(root_control, false))
 
 	if scene_path != "":
 		hit_button.pressed.connect(func():
@@ -1045,6 +2467,348 @@ func _nav_button(texture: Texture2D, text: String, active: bool, scene_path: Str
 
 	root_control.add_child(hit_button)
 	return root_control
+
+
+func _get_nav_hit_button(nav_button: Control) -> Button:
+	return nav_button.get_node("HitButton") as Button
+
+
+func _on_nav_button_hovered(nav_button: Control, hovered: bool) -> void:
+	if bool(nav_button.get_meta("nav_active", false)):
+		return
+
+	var panel: PanelContainer = nav_button.get_node("Panel") as PanelContainer
+	var bg_color: Color = C_PANEL_SOFT if hovered else C_WHITE
+	var border_color: Color = C_BLUE if hovered else C_LINE
+	panel.add_theme_stylebox_override("panel", _style_box(bg_color, border_color, 1, 4))
+
+
+func _set_nav_button_active(nav_button: Control, active: bool) -> void:
+	if nav_button == null:
+		return
+
+	nav_button.set_meta("nav_active", active)
+
+	var panel: PanelContainer = nav_button.get_node("Panel") as PanelContainer
+	var nav_icon: TextureRect = nav_button.find_child("Icon", true, false) as TextureRect
+	var label: Label = nav_button.find_child("Label", true, false) as Label
+
+	panel.add_theme_stylebox_override(
+		"panel",
+		_style_box(C_BLUE_ACTIVE if active else C_WHITE, C_BLUE_DARK if active else C_LINE, 1, 4)
+	)
+	# `_icon()` stores its tint in `modulate`. Updating only `self_modulate`
+	# multiplies the new color by the old blue tint, so an activated icon can
+	# remain blue. Replace the actual tint and keep self_modulate neutral.
+	nav_icon.modulate = C_WHITE if active else C_BLUE
+	nav_icon.self_modulate = C_WHITE
+	label.add_theme_color_override("font_color", C_WHITE if active else C_BLUE)
+
+
+func _open_settings_page() -> void:
+	var source_context: String = _get_active_page_context()
+	_stop_audio_for_context_change()
+	_hide_keyword_action()
+	_cancel_keyword_connection_selection(false)
+	_set_nav_button_active(story_nav_button, false)
+	_set_nav_button_active(graph_nav_button, false)
+	_set_nav_button_active(save_nav_button, false)
+	_set_nav_button_active(load_nav_button, false)
+	_set_nav_button_active(settings_nav_button, true)
+	settings_requested.emit(source_context)
+
+
+func _get_active_page_context() -> String:
+	if _data_page_open:
+		if save_view != null and save_view.visible:
+			return "save"
+		if load_view != null and load_view.visible:
+			return "load"
+	if graph_view != null and graph_view.visible:
+		return "graph"
+	return "story"
+
+
+func restore_settings_context(source_context: String) -> void:
+	_set_nav_button_active(settings_nav_button, false)
+	_set_nav_button_active(story_nav_button, source_context == "story")
+	_set_nav_button_active(graph_nav_button, source_context == "graph")
+	_set_nav_button_active(save_nav_button, source_context == "save")
+	_set_nav_button_active(load_nav_button, source_context == "load")
+
+
+func _open_save_page() -> void:
+	if save_view == null:
+		_show_case_status("存档页面不可用")
+		return
+
+	_prepare_data_page_open()
+	load_view.call("close_page")
+	save_view.call("open_page")
+	_set_data_page_nav_state(true, false)
+
+
+func _open_load_page() -> void:
+	if load_view == null:
+		_show_case_status("读档页面不可用")
+		return
+
+	_prepare_data_page_open()
+	save_view.call("close_page")
+	load_view.call("open_page")
+	_set_data_page_nav_state(false, true)
+
+
+func _prepare_data_page_open() -> void:
+	if not _data_page_open:
+		_return_to_graph_view = graph_view.visible
+
+	_data_page_open = true
+	_stop_audio_for_context_change()
+	_hide_keyword_action()
+	_cancel_keyword_connection_selection(false)
+	_case_status_generation += 1
+	case_status_panel.visible = false
+	story_view.visible = false
+	graph_view.visible = false
+
+
+func _return_from_data_page() -> void:
+	_hide_data_pages()
+
+	if _return_to_graph_view:
+		_set_center_view(true)
+	else:
+		_set_center_view(false)
+
+
+func _hide_data_pages() -> void:
+	if save_view != null:
+		save_view.call("close_page")
+
+	if load_view != null:
+		load_view.call("close_page")
+
+	_data_page_open = false
+	_set_nav_button_active(save_nav_button, false)
+	_set_nav_button_active(load_nav_button, false)
+
+
+func _set_data_page_nav_state(save_active: bool, load_active: bool) -> void:
+	_set_nav_button_active(story_nav_button, false)
+	_set_nav_button_active(graph_nav_button, false)
+	_set_nav_button_active(save_nav_button, save_active)
+	_set_nav_button_active(load_nav_button, load_active)
+	_set_nav_button_active(settings_nav_button, false)
+
+
+func _on_manual_save_requested(slot_index: int) -> void:
+	if save_manager == null:
+		return
+
+	var node_data: Dictionary = loader.get_node(runtime_state.current_node_id)
+	var result: Dictionary = save_manager.save_manual(
+		slot_index,
+		_build_save_metadata(node_data),
+		runtime_state.to_save_dictionary()
+	)
+
+	if save_view != null:
+		save_view.call("report_save_result", result, slot_index)
+
+	if not bool(result.get("success", false)):
+		push_warning("MainUI: manual save failed: " + str(result.get("error", "")))
+
+
+func _on_load_requested(slot_type: String, slot_index: int) -> void:
+	if save_manager == null:
+		return
+
+	var load_result: Dictionary = (
+		save_manager.load_autosave()
+		if slot_type == "autosave"
+		else save_manager.load_manual(slot_index)
+	)
+
+	if not bool(load_result.get("success", false)):
+		_report_load_failure(str(load_result.get("error", "存档不可读取")))
+		return
+
+	var document_value: Variant = load_result.get("data", {})
+
+	if not (document_value is Dictionary):
+		_report_load_failure("存档根数据无效")
+		return
+
+	var document: Dictionary = document_value
+	var runtime_value: Variant = document.get("runtime_state", {})
+
+	if not (runtime_value is Dictionary):
+		_report_load_failure("存档运行状态无效")
+		return
+
+	var runtime_data: Dictionary = runtime_value
+
+	if not runtime_state.validate_save_dictionary(runtime_data):
+		_report_load_failure("存档运行状态校验失败")
+		return
+
+	var loaded_node_id: String = str(runtime_data.get("current_node_id", ""))
+	var loaded_node_data: Dictionary = loader.get_node(loaded_node_id)
+
+	if loaded_node_data.is_empty():
+		_report_load_failure("存档节点不存在于当前案件：" + loaded_node_id)
+		return
+
+	_stop_audio_for_context_change()
+	_hide_keyword_action()
+	_cancel_keyword_connection_selection(false)
+	_graph_feedback_generation += 1
+	_audio_feedback_generation += 1
+	_case_status_generation += 1
+	graph_status_panel.visible = false
+	case_status_panel.visible = false
+
+	if not runtime_state.apply_save_dictionary(runtime_data):
+		_report_load_failure("应用存档运行状态失败")
+		return
+
+	_render_node(loaded_node_data)
+	story_scroll.scroll_vertical = 0
+	_hide_data_pages()
+	story_view.visible = true
+	graph_view.visible = false
+	_set_nav_button_active(story_nav_button, true)
+	_set_nav_button_active(graph_nav_button, false)
+	_show_case_status("存档读取成功")
+
+
+func _report_load_failure(error: String) -> void:
+	push_warning("MainUI: load failed: " + error)
+
+	if load_view != null:
+		load_view.call("report_load_failure", error)
+
+
+func _write_disk_autosave(node_data: Dictionary) -> void:
+	if save_manager == null:
+		return
+
+	var result: Dictionary = save_manager.save_autosave(
+		_build_save_metadata(node_data),
+		runtime_state.to_save_dictionary()
+	)
+
+	if not bool(result.get("success", false)):
+		var error: String = str(result.get("error", "未知错误"))
+		push_warning("MainUI: autosave failed: " + error)
+		_show_case_status("自动存档写入失败")
+
+
+func _build_save_metadata(node_data: Dictionary) -> Dictionary:
+	return {
+		"chapter_title": loader.get_chapter_title(),
+		"node_title": str(node_data.get("title", "未知节点")),
+		"node_id": str(node_data.get("node_id", runtime_state.current_node_id))
+	}
+
+
+func _show_story_view() -> void:
+	_hide_data_pages()
+	_set_center_view(false)
+
+
+func _show_graph_view() -> void:
+	_hide_data_pages()
+	_set_center_view(true)
+
+
+func _set_center_view(show_graph: bool) -> void:
+	_hide_keyword_action()
+	_cancel_keyword_connection_selection(false)
+
+	if show_graph:
+		_stop_audio_for_context_change()
+
+	story_view.visible = not show_graph
+	graph_view.visible = show_graph
+	_set_nav_button_active(story_nav_button, not show_graph)
+	_set_nav_button_active(graph_nav_button, show_graph)
+	_set_nav_button_active(save_nav_button, false)
+	_set_nav_button_active(load_nav_button, false)
+	_set_nav_button_active(settings_nav_button, false)
+
+	if show_graph:
+		var current_data: Dictionary = loader.get_node(runtime_state.current_node_id)
+
+		if not current_data.is_empty():
+			_render_right_panel(current_data)
+
+		call_deferred("_scroll_graph_to_current")
+		call_deferred("_apply_scrollbar_styles")
+
+
+func _scroll_graph_to_current() -> void:
+	if graph_scroll == null or not graph_view.visible:
+		return
+
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	if not graph_view.visible:
+		return
+
+	var viewport_size: Vector2 = graph_scroll.size
+	var horizontal_bar: HScrollBar = graph_scroll.get_h_scroll_bar()
+	var vertical_bar: VScrollBar = graph_scroll.get_v_scroll_bar()
+
+	if vertical_bar.visible:
+		viewport_size.x -= vertical_bar.size.x
+
+	if horizontal_bar.visible:
+		viewport_size.y -= horizontal_bar.size.y
+
+	viewport_size.x = maxf(1.0, viewport_size.x)
+	viewport_size.y = maxf(1.0, viewport_size.y)
+
+	var horizontal_target := 0.0
+	var vertical_target := 0.0
+	var current_control: Control = _find_graph_node_control(runtime_state.current_node_id)
+
+	if current_control != null:
+		var current_center: Vector2 = current_control.position + current_control.size * 0.5
+		horizontal_target = current_center.x - viewport_size.x * GRAPH_CURRENT_ANCHOR.x
+		vertical_target = current_center.y - viewport_size.y * GRAPH_CURRENT_ANCHOR.y
+	else:
+		var current_position: Vector2 = loader.get_graph_node_position(runtime_state.current_node_id)
+
+		if current_position.x >= 0.0 and current_position.y >= 0.0:
+			var fallback_center: Vector2 = current_position + GRAPH_NODE_SIZE * 0.5
+			horizontal_target = fallback_center.x - viewport_size.x * GRAPH_CURRENT_ANCHOR.x
+			vertical_target = fallback_center.y - viewport_size.y * GRAPH_CURRENT_ANCHOR.y
+
+	horizontal_target = clampf(horizontal_target, 0.0, horizontal_bar.max_value)
+	vertical_target = clampf(vertical_target, 0.0, vertical_bar.max_value)
+	graph_scroll.scroll_horizontal = roundi(horizontal_target)
+	graph_scroll.scroll_vertical = roundi(vertical_target)
+
+
+func _find_graph_node_control(node_id: String) -> Control:
+	for child in graph_canvas.get_children():
+		if not (child is Control):
+			continue
+
+		var child_control: Control = child as Control
+
+		if (
+			bool(child_control.get_meta("graph_node_card", false))
+			and str(child_control.get_meta("graph_node_id", "")) == node_id
+			and child_control.visible
+			and not child_control.is_queued_for_deletion()
+		):
+			return child_control
+
+	return null
 
 
 func _choice_button(texture: Texture2D, title: String, desc: String, choice: Dictionary) -> Control:
@@ -1252,7 +3016,65 @@ func _attr_row(left: String, key: String) -> Control:
 
 
 func _keyword_tag(text: String) -> Control:
-	return _small_framed_label(text, Vector2(64, 29), 14, C_BLUE, Color.TRANSPARENT, C_BLUE, 1, 2, FONT_SERIF_REGULAR)
+	var panel := PanelContainer.new()
+	panel.set_meta("keyword_full_text", text)
+	panel.custom_minimum_size.y = 27.0
+	panel.tooltip_text = text
+	var box: StyleBoxFlat = _style_box(Color.TRANSPARENT, C_BLUE, 1, 2)
+	box.content_margin_left = 8.0
+	box.content_margin_right = 8.0
+	box.content_margin_top = 4.0
+	box.content_margin_bottom = 4.0
+	panel.add_theme_stylebox_override("panel", box)
+
+	var label := _label(text, 14, C_BLUE, FONT_SERIF_REGULAR)
+	label.name = "KeywordLabel"
+	label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	label.clip_text = true
+	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.tooltip_text = text
+	panel.add_child(label)
+	return panel
+
+
+func _update_keyword_tag_widths() -> void:
+	if keyword_grid == null or keyword_width_container == null:
+		return
+
+	var available_width: float = (
+		keyword_width_container.size.x
+		- float(keyword_width_container.get_theme_constant("margin_left"))
+		- float(keyword_width_container.get_theme_constant("margin_right"))
+	)
+
+	if available_width <= 0.0:
+		return
+
+	for child in keyword_grid.get_children():
+		if not (child is PanelContainer) or child.is_queued_for_deletion():
+			continue
+
+		var panel: PanelContainer = child as PanelContainer
+		var label: Label = panel.get_node_or_null("KeywordLabel") as Label
+
+		if label == null:
+			continue
+
+		var full_text: String = str(panel.get_meta("keyword_full_text", label.text))
+		var font: Font = label.get_theme_font("font")
+		var font_size: int = label.get_theme_font_size("font_size")
+		var text_width: float = font.get_string_size(
+			full_text,
+			HORIZONTAL_ALIGNMENT_LEFT,
+			-1.0,
+			font_size
+		).x
+		panel.custom_minimum_size.x = minf(ceilf(text_width + 16.0), available_width)
+
+	keyword_grid.queue_sort()
 
 
 func _icon_by_name(name: String) -> Texture2D:
@@ -1381,6 +3203,7 @@ func _transparent_hit_button() -> Button:
 	btn.add_theme_stylebox_override("normal", _style_box(Color.TRANSPARENT, Color.TRANSPARENT, 0, 0))
 	btn.add_theme_stylebox_override("hover", _style_box(Color.TRANSPARENT, Color.TRANSPARENT, 0, 0))
 	btn.add_theme_stylebox_override("pressed", _style_box(Color.TRANSPARENT, Color.TRANSPARENT, 0, 0))
+	btn.add_theme_stylebox_override("disabled", _style_box(Color.TRANSPARENT, Color.TRANSPARENT, 0, 0))
 	btn.add_theme_stylebox_override("focus", _style_box(Color.TRANSPARENT, Color.TRANSPARENT, 0, 0))
 	return btn
 
@@ -1440,20 +3263,21 @@ func _dock_center(control: Control, left: int, right: int, top: int) -> void:
 	control.offset_bottom = 0
 
 
-func _apply_story_scrollbar_style() -> void:
-	if story_scroll == null:
-		return
+func _apply_scrollbar_styles() -> void:
+	if story_scroll != null:
+		_apply_scrollbar_style(story_scroll.get_v_scroll_bar(), true)
 
-	var bar := story_scroll.get_v_scroll_bar()
+	if graph_scroll != null:
+		_apply_scrollbar_style(graph_scroll.get_v_scroll_bar(), true)
+		_apply_scrollbar_style(graph_scroll.get_h_scroll_bar(), false)
 
-	if bar == null:
-		return
 
+func _apply_scrollbar_style(bar: ScrollBar, vertical: bool) -> void:
 	# 默认保持低对比度；鼠标悬停时才切换为界面主蓝色。
 	var scrollbar_track_color := Color("#EDF2FC")
 	var scrollbar_idle_color := Color("#BFD0F6")
 
-	bar.custom_minimum_size = Vector2(8, 0)
+	bar.custom_minimum_size = Vector2(8, 0) if vertical else Vector2(0, 8)
 	bar.add_theme_stylebox_override(
 		"scroll",
 		_style_box(scrollbar_track_color, Color.TRANSPARENT, 0, 3)
@@ -1480,7 +3304,16 @@ func _on_choice_pressed(choice: Dictionary) -> void:
 	var action: String = str(choice.get("action", ""))
 
 	if action == "play_audio":
-		push_warning("MainUI: audio playback is not connected in this Vertical Slice yet.")
+		var current_data: Dictionary = loader.get_node(runtime_state.current_node_id)
+		var audio_clues: Variant = current_data.get("audio_clues", [])
+		var audio_clue_id: String = _first_array_value(audio_clues, "")
+
+		if audio_clue_id != "":
+			_on_audio_play_pressed(audio_clue_id)
+		else:
+			push_warning("MainUI: current node has no audio clue to play.")
+			_show_case_status("当前节点没有可播放的音频")
+
 		return
 
 	if action == "load_last_safe_autosave":
@@ -1490,6 +3323,7 @@ func _on_choice_pressed(choice: Dictionary) -> void:
 			_show_node(safe_id)
 		else:
 			push_warning("MainUI: no safe autosave node is available.")
+			_show_case_status("当前没有可返回的安全节点")
 
 		return
 

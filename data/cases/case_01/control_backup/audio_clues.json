@@ -3,7 +3,7 @@
 		{
 			"id": "audio_backup_a17",
 			"title": "备份录音 A-17",
-			"file": "res://audio/clues/studio_noise_01.ogg",
+			"file": "res://data/audio/clues/studio_noise_01.mp3",
 			"duration": 42.0,
 			"type": "环境音",
 			"source": "控制室备份录音",

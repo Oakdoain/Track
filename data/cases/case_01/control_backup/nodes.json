@@ -361,7 +361,7 @@
 					"to": "node_0026"
 				}
 			],
-			"autosave": true
+			"autosave": false
 		},
 		{
 			"node_id": "node_0033",
@@ -389,7 +389,7 @@
 					"to": "node_0027"
 				}
 			],
-			"autosave": true
+			"autosave": false
 		},
 		{
 			"node_id": "node_0034",

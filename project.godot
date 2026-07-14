@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="第三轨：隔音室谋杀案"
-run/main_scene="uid://b8h4wp84bca6q"
+run/main_scene="res://scenes/AppRoot.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 config/icon="res://icon.svg"
 

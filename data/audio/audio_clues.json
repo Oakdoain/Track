@@ -3,7 +3,7 @@
 		{
 			"id": "audio_studio_noise_01",
 			"title": "录音棚底噪 01",
-			"file": "res://data/audio/clues/studio_noise_01.ogg",
+			"file": "res://data/audio/clues/studio_noise_01.mp3",
 			"duration": 42.0,
 			"type": "环境音",
 			"source": "控制室备份录音",

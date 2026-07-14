@@ -3,10 +3,33 @@ extends Control
 const WAVE_COLOR := Color("#123FA4")
 const WAVE_SOFT := Color("#8FA8F2")
 const CENTER_LINE := Color("#D7DEF3")
+const PROGRESS_COLOR := Color("#0A318A")
+const MARKER_COLOR := Color("#1044B2")
+
+var _progress_ratio: float = 0.0
+var _marker_ratios: PackedFloat32Array = PackedFloat32Array()
 
 
 func _ready() -> void:
-	custom_minimum_size = Vector2(520, 74)
+	custom_minimum_size = Vector2(520, 104)
+
+
+func set_progress_ratio(value: float) -> void:
+	var safe_value: float = 0.0 if is_nan(value) or is_inf(value) else value
+	_progress_ratio = clampf(safe_value, 0.0, 1.0)
+	queue_redraw()
+
+
+func set_marker_ratios(values: PackedFloat32Array) -> void:
+	_marker_ratios.clear()
+
+	for value in values:
+		if is_nan(value) or is_inf(value):
+			continue
+
+		_marker_ratios.append(clampf(value, 0.0, 1.0))
+
+	queue_redraw()
 
 
 func _draw() -> void:
@@ -43,3 +66,24 @@ func _draw() -> void:
 			2.0,
 			true
 		)
+
+	var marker_half_height: float = draw_size.y * 0.28
+
+	for marker_ratio in _marker_ratios:
+		var marker_x: float = start_x + usable_width * marker_ratio
+		draw_line(
+			Vector2(marker_x, center_y - marker_half_height),
+			Vector2(marker_x, center_y + marker_half_height),
+			MARKER_COLOR,
+			2.0,
+			true
+		)
+
+	var progress_x: float = start_x + usable_width * _progress_ratio
+	draw_line(
+		Vector2(progress_x, 8.0),
+		Vector2(progress_x, draw_size.y - 8.0),
+		PROGRESS_COLOR,
+		3.0,
+		true
+	)
