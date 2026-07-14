@@ -30,6 +30,7 @@ const ICON_SETTINGS := preload("res://assets/icons/lucide/settings.svg")
 const ICON_POWER := preload("res://assets/icons/lucide/power.svg")
 
 var save_manager: SaveManager
+var new_game_button: Button
 var continue_button: Button
 var summary_status_label: Label
 var summary_title_label: Label
@@ -40,7 +41,7 @@ var _menu_buttons: Array[Button] = []
 
 func _ready() -> void:
 	_build_ui()
-	call_deferred("_focus_first_button")
+	call_deferred("_apply_default_menu_focus")
 
 
 func configure(manager: SaveManager) -> void:
@@ -82,6 +83,9 @@ func refresh_autosave_summary() -> void:
 		summary_time_label.text = ""
 
 	continue_button.tooltip_text = "" if available else summary_status_label.text
+	_refresh_primary_action()
+	_wire_button_focus()
+	call_deferred("_apply_default_menu_focus")
 
 
 func show_feedback(message: String) -> void:
@@ -94,7 +98,8 @@ func clear_feedback() -> void:
 
 
 func focus_default() -> void:
-	_focus_first_button()
+	_refresh_primary_action()
+	_apply_default_menu_focus()
 
 
 func _build_ui() -> void:
@@ -200,9 +205,9 @@ func _build_ui() -> void:
 	menu_rule.add_theme_stylebox_override("separator", _style_box(C_DIVIDER, C_DIVIDER, 1, 0))
 	menu.add_child(menu_rule)
 
-	var new_button := _menu_button("新游戏", ICON_PLAY)
-	new_button.pressed.connect(func(): new_game_requested.emit())
-	menu.add_child(new_button)
+	new_game_button = _menu_button("新游戏", ICON_PLAY)
+	new_game_button.pressed.connect(func(): new_game_requested.emit())
+	menu.add_child(new_game_button)
 
 	continue_button = _menu_button("继续游戏", ICON_REFRESH)
 	continue_button.pressed.connect(func(): continue_requested.emit())
@@ -283,21 +288,56 @@ func _menu_button(text: String, icon: Texture2D) -> Button:
 	return button
 
 
-func _wire_button_focus() -> void:
-	if _menu_buttons.is_empty():
+func _refresh_primary_action() -> void:
+	if new_game_button == null or continue_button == null:
 		return
-	for index in range(_menu_buttons.size()):
-		var previous: Button = _menu_buttons[(index - 1 + _menu_buttons.size()) % _menu_buttons.size()]
-		var next: Button = _menu_buttons[(index + 1) % _menu_buttons.size()]
-		_menu_buttons[index].focus_neighbor_top = previous.get_path()
-		_menu_buttons[index].focus_neighbor_bottom = next.get_path()
+
+	var continue_is_primary: bool = not continue_button.disabled
+	_apply_menu_button_primary_style(new_game_button, not continue_is_primary)
+	_apply_menu_button_primary_style(continue_button, continue_is_primary)
 
 
-func _focus_first_button() -> void:
+func _apply_menu_button_primary_style(button: Button, primary: bool) -> void:
+	if button == null:
+		return
+
+	button.set_meta("default_primary", primary)
+	button.add_theme_color_override("font_color", C_WHITE if primary else C_BLUE)
+	button.add_theme_color_override("icon_normal_color", C_WHITE if primary else C_BLUE)
+	button.add_theme_stylebox_override(
+		"normal",
+		_button_box(C_BLUE if primary else C_WHITE, C_BLUE if primary else C_LINE)
+	)
+
+
+func _wire_button_focus() -> void:
+	var enabled_buttons: Array[Button] = []
+
 	for button in _menu_buttons:
-		if not button.disabled and button.is_visible_in_tree():
-			button.grab_focus()
-			return
+		if not button.disabled and button.visible:
+			enabled_buttons.append(button)
+
+	if enabled_buttons.is_empty():
+		return
+
+	for index in range(enabled_buttons.size()):
+		var previous: Button = enabled_buttons[
+			(index - 1 + enabled_buttons.size()) % enabled_buttons.size()
+		]
+		var next: Button = enabled_buttons[(index + 1) % enabled_buttons.size()]
+		enabled_buttons[index].focus_neighbor_top = previous.get_path()
+		enabled_buttons[index].focus_neighbor_bottom = next.get_path()
+
+
+func _apply_default_menu_focus() -> void:
+	var default_button: Button = (
+		continue_button
+		if continue_button != null and not continue_button.disabled
+		else new_game_button
+	)
+
+	if default_button != null and default_button.is_visible_in_tree():
+		default_button.grab_focus()
 
 
 func _button_box(background: Color, border: Color, width: int = 1) -> StyleBoxFlat:

@@ -6,8 +6,16 @@ signal load_requested(slot_type: String, slot_index: int)
 
 const SLOTS_PER_PAGE := 7
 const PAGE_COUNT := 3
-const MAX_CONTENT_WIDTH := 1500.0
+const MAX_CONTENT_WIDTH := 1480.0
 const SLOT_ROW_HEIGHT := 76.0
+const SLOT_LIST_WIDTH := 920.0
+const DETAIL_PANEL_WIDTH := 380.0
+const BODY_SEPARATION := 28
+const COLUMN_SELECT_WIDTH := 52.0
+const COLUMN_SLOT_WIDTH := 82.0
+const COLUMN_NAME_MIN_WIDTH := 320.0
+const COLUMN_STATUS_WIDTH := 140.0
+const COLUMN_TIME_WIDTH := 210.0
 
 const C_BG := Color("#F7F9FF")
 const C_PANEL_SOFT := Color("#EEF3FF")
@@ -47,6 +55,7 @@ var previous_button: Button
 var next_button: Button
 var load_button: Button
 var feedback_label: Label
+var used_slots_label: Label
 var selected_slot_label: Label
 var selected_title_label: Label
 var selected_chapter_label: Label
@@ -77,12 +86,21 @@ func close_page() -> void:
 	visible = false
 
 
+func suspend_for_settings() -> void:
+	visible = false
+
+
+func resume_from_settings() -> void:
+	visible = true
+
+
 func refresh_slots() -> void:
 	if save_manager == null:
 		feedback_label.text = "存档管理器不可用"
 		return
 
 	_summaries = save_manager.get_all_slot_summaries()
+	_refresh_used_slots_label()
 	_render_page()
 
 
@@ -125,11 +143,13 @@ func _build_ui() -> void:
 	var body := HBoxContainer.new()
 	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	body.add_theme_constant_override("separation", 24)
+	body.alignment = BoxContainer.ALIGNMENT_CENTER
+	body.add_theme_constant_override("separation", BODY_SEPARATION)
 	content_box.add_child(body)
 
 	var list_panel := PanelContainer.new()
-	list_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	list_panel.custom_minimum_size.x = SLOT_LIST_WIDTH
+	list_panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	list_panel.add_theme_stylebox_override("panel", _style_box(Color.TRANSPARENT, C_DIVIDER, 1, 4))
 	body.add_child(list_panel)
 
@@ -197,7 +217,7 @@ func _build_list_heading() -> Control:
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	heading.add_child(spacer)
-	heading.add_child(_small_tag("固定档位 21", Vector2(112, 30)))
+	heading.add_child(_build_used_slots_tag())
 	return heading
 
 
@@ -208,19 +228,20 @@ func _build_column_header() -> Control:
 	margin.add_theme_constant_override("margin_right", 14)
 	var row := HBoxContainer.new()
 	margin.add_child(row)
-	row.add_child(_header_label("", 34, HORIZONTAL_ALIGNMENT_CENTER))
-	row.add_child(_header_label("档位", 74, HORIZONTAL_ALIGNMENT_CENTER))
-	var name_header := _header_label("档位名称", 0, HORIZONTAL_ALIGNMENT_LEFT)
+	row.add_child(_header_label("", int(COLUMN_SELECT_WIDTH), HORIZONTAL_ALIGNMENT_CENTER))
+	row.add_child(_header_label("档位", int(COLUMN_SLOT_WIDTH), HORIZONTAL_ALIGNMENT_CENTER))
+	var name_header := _header_label("档位名称", int(COLUMN_NAME_MIN_WIDTH), HORIZONTAL_ALIGNMENT_LEFT)
 	name_header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(name_header)
-	row.add_child(_header_label("状态", 110, HORIZONTAL_ALIGNMENT_CENTER))
-	row.add_child(_header_label("保存时间", 190, HORIZONTAL_ALIGNMENT_RIGHT))
+	row.add_child(_header_label("状态", int(COLUMN_STATUS_WIDTH), HORIZONTAL_ALIGNMENT_CENTER))
+	row.add_child(_header_label("保存时间", int(COLUMN_TIME_WIDTH), HORIZONTAL_ALIGNMENT_RIGHT))
 	return margin
 
 
 func _build_detail_panel() -> Control:
 	var panel := PanelContainer.new()
-	panel.custom_minimum_size.x = 356
+	panel.custom_minimum_size.x = DETAIL_PANEL_WIDTH
+	panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	panel.add_theme_stylebox_override("panel", _style_box(Color.TRANSPARENT, C_DIVIDER, 1, 4))
 
 	var margin := MarginContainer.new()
@@ -371,20 +392,22 @@ func _build_slot_card(summary: Dictionary) -> Control:
 	margin.add_child(row)
 
 	var radio_box := CenterContainer.new()
-	radio_box.custom_minimum_size.x = 34
+	radio_box.custom_minimum_size.x = COLUMN_SELECT_WIDTH
+	radio_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(radio_box)
 	var radio_texture: Texture2D = ICON_CIRCLE_DOT if selected else ICON_CIRCLE
 	radio_box.add_child(_icon(radio_texture, Vector2(19, 19), C_BLUE if available else C_MUTED))
 
 	var slot_text: String = "自动" if slot_type == "autosave" else "%02d" % slot_index
 	var slot_label := _label(slot_text, 17, C_BLUE if available else C_MUTED, FONT_MONO_MEDIUM)
-	slot_label.custom_minimum_size.x = 74
+	slot_label.custom_minimum_size.x = COLUMN_SLOT_WIDTH
 	slot_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	slot_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	row.add_child(slot_label)
 
 	var metadata: Dictionary = summary.get("metadata", {})
 	var detail_box := VBoxContainer.new()
+	detail_box.custom_minimum_size.x = COLUMN_NAME_MIN_WIDTH
 	detail_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	detail_box.add_theme_constant_override("separation", 2)
 	row.add_child(detail_box)
@@ -402,13 +425,13 @@ func _build_slot_card(summary: Dictionary) -> Control:
 	))
 
 	var state_label := _label(_status_label(status), 14, C_BLUE if available else C_MUTED, FONT_SERIF_REGULAR)
-	state_label.custom_minimum_size.x = 110
+	state_label.custom_minimum_size.x = COLUMN_STATUS_WIDTH
 	state_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	state_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	row.add_child(state_label)
 
 	var time_label := _label(str(summary.get("saved_at_text", "—")), 13, C_SUBTEXT if available else C_MUTED, FONT_MONO_REGULAR)
-	time_label.custom_minimum_size.x = 190
+	time_label.custom_minimum_size.x = COLUMN_TIME_WIDTH
 	time_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	time_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	row.add_child(time_label)
@@ -465,6 +488,7 @@ func _on_load_pressed() -> void:
 
 func _update_load_button() -> void:
 	load_button.disabled = selected_slot_type == "" or selected_slot_index < 0
+	_refresh_centered_button_content(load_button)
 
 
 func _render_selected_detail() -> void:
@@ -502,7 +526,7 @@ func _summary_for_selected_slot() -> Dictionary:
 
 func _status_primary_text(status: String, metadata: Dictionary) -> String:
 	if status == "available":
-		return str(metadata.get("node_title", "当前节点"))
+		return str(metadata.get("chapter_title", "控制室备份录音"))
 	if status == "corrupted":
 		return "存档损坏"
 	if status == "incompatible":
@@ -512,7 +536,7 @@ func _status_primary_text(status: String, metadata: Dictionary) -> String:
 
 func _status_secondary_text(status: String, metadata: Dictionary, summary: Dictionary) -> String:
 	if status == "available":
-		return "%s · %s" % [str(metadata.get("chapter_title", "未知章节")), str(metadata.get("node_id", ""))]
+		return "%s · %s" % [str(metadata.get("node_title", "当前节点")), str(metadata.get("node_id", ""))]
 	if status == "corrupted" or status == "incompatible":
 		return str(summary.get("error", "存档不可读取"))
 	return "暂无数据"
@@ -551,6 +575,30 @@ func _small_tag(text: String, min_size: Vector2) -> Control:
 	return panel
 
 
+func _build_used_slots_tag() -> Control:
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(144, 30)
+	panel.add_theme_stylebox_override("panel", _style_box(Color.TRANSPARENT, C_LINE, 1, 4))
+	used_slots_label = _label("已用档位 0/21", 13, C_BLUE, FONT_SERIF_REGULAR)
+	used_slots_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	used_slots_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	panel.add_child(used_slots_label)
+	return panel
+
+
+func _refresh_used_slots_label() -> void:
+	if used_slots_label == null:
+		return
+
+	var used_count: int = 0
+
+	for summary in _summaries:
+		if str(summary.get("status", "empty")) != "empty":
+			used_count += 1
+
+	used_slots_label.text = "已用档位 %d/21" % used_count
+
+
 func _header_label(text: String, width: int, alignment: HorizontalAlignment) -> Label:
 	var label := _label(text, 13, C_BLUE, FONT_SERIF_SEMIBOLD)
 	label.custom_minimum_size.x = width
@@ -563,6 +611,7 @@ func _ellipsis_label(text: String, font_size: int, color: Color, font: Font) -> 
 	var label := _label(text, font_size, color, font)
 	label.clip_text = true
 	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	label.tooltip_text = text
 	return label
 
 
@@ -622,28 +671,73 @@ func _apply_compact_button_style(button: Button, active: bool) -> void:
 
 func _button(text: String, active: bool, icon: Texture2D = null) -> Button:
 	var button := Button.new()
-	button.text = text
-	button.icon = icon
 	button.custom_minimum_size = Vector2(132, 42)
-	button.focus_mode = Control.FOCUS_NONE
-	button.add_theme_font_override("font", FONT_SERIF_SEMIBOLD)
-	button.add_theme_font_size_override("font_size", 15)
-	button.add_theme_color_override("font_color", C_WHITE if active else C_BLUE)
-	button.add_theme_color_override("font_hover_color", C_WHITE if active else C_BLUE)
-	button.add_theme_color_override("font_pressed_color", C_WHITE)
-	button.add_theme_color_override("font_focus_color", C_WHITE if active else C_BLUE)
-	button.add_theme_color_override("font_disabled_color", C_MUTED)
-	button.add_theme_color_override("icon_normal_color", C_WHITE if active else C_BLUE)
-	button.add_theme_color_override("icon_hover_color", C_WHITE if active else C_BLUE)
-	button.add_theme_color_override("icon_pressed_color", C_WHITE)
-	button.add_theme_color_override("icon_focus_color", C_WHITE if active else C_BLUE)
-	button.add_theme_color_override("icon_disabled_color", C_MUTED)
+	button.focus_mode = Control.FOCUS_ALL
+	button.set_meta("centered_action_primary", active)
+	button.set_meta("centered_action_down", false)
 	button.add_theme_stylebox_override("normal", _style_box(C_BLUE if active else C_WHITE, C_BLUE if active else C_LINE, 1, 4))
 	button.add_theme_stylebox_override("hover", _style_box(C_BLUE_DARK if active else C_PANEL_SOFT, C_BLUE, 1, 4))
 	button.add_theme_stylebox_override("pressed", _style_box(C_BLUE_DARK, C_BLUE_DARK, 1, 4))
 	button.add_theme_stylebox_override("focus", _style_box(C_BLUE if active else C_PANEL_SOFT, C_BLUE, 1, 4))
 	button.add_theme_stylebox_override("disabled", _style_box(C_PANEL_SOFT, C_DIVIDER, 1, 4))
+
+	var center := CenterContainer.new()
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_fill_rect(center)
+	button.add_child(center)
+	var content := HBoxContainer.new()
+	content.name = "CenteredContent"
+	content.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	content.add_theme_constant_override("separation", 10)
+	center.add_child(content)
+
+	if icon != null:
+		var icon_rect := _icon(icon, Vector2(19, 19), C_WHITE if active else C_BLUE)
+		icon_rect.name = "ActionIcon"
+		content.add_child(icon_rect)
+
+	var text_label := _label(text, 15, C_WHITE if active else C_BLUE, FONT_SERIF_SEMIBOLD)
+	text_label.name = "ActionLabel"
+	text_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	content.add_child(text_label)
+
+	button.mouse_entered.connect(_refresh_centered_button_content.bind(button))
+	button.mouse_exited.connect(_refresh_centered_button_content.bind(button))
+	button.button_down.connect(_set_centered_button_down.bind(button, true))
+	button.button_up.connect(_set_centered_button_down.bind(button, false))
+	button.focus_entered.connect(_refresh_centered_button_content.bind(button))
+	button.focus_exited.connect(_refresh_centered_button_content.bind(button))
+	call_deferred("_refresh_centered_button_content", button)
 	return button
+
+
+func _set_centered_button_down(button: Button, pressed: bool) -> void:
+	if button == null or not is_instance_valid(button):
+		return
+
+	button.set_meta("centered_action_down", pressed)
+	_refresh_centered_button_content(button)
+
+
+func _refresh_centered_button_content(button: Button) -> void:
+	if button == null or not is_instance_valid(button):
+		return
+
+	var primary: bool = bool(button.get_meta("centered_action_primary", false))
+	var pressed: bool = bool(button.get_meta("centered_action_down", false))
+	var color: Color = C_WHITE if primary or pressed else C_BLUE
+
+	if button.disabled:
+		color = C_MUTED
+
+	var label: Label = button.find_child("ActionLabel", true, false) as Label
+	var icon_rect: TextureRect = button.find_child("ActionIcon", true, false) as TextureRect
+
+	if label != null:
+		label.add_theme_color_override("font_color", color)
+
+	if icon_rect != null:
+		icon_rect.modulate = color
 
 
 func _label(text: String, font_size: int, color: Color, font: Font) -> Label:

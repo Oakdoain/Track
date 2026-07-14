@@ -9,6 +9,7 @@ var data: Dictionary = {}
 var nodes_by_id: Dictionary = {}
 var graph_layout: Dictionary = {}
 var keyword_rules: Array[Dictionary] = []
+var keyword_presets: Dictionary = {}
 
 
 func load_nodes(path: String = DEFAULT_NODES_PATH) -> bool:
@@ -157,6 +158,7 @@ func get_graph_node_position(node_id: String) -> Vector2:
 
 func load_keyword_rules(path: String = DEFAULT_KEYWORD_RULES_PATH) -> bool:
 	keyword_rules.clear()
+	keyword_presets.clear()
 
 	if not FileAccess.file_exists(path):
 		push_warning("CaseDataLoader: keyword rules file not found: " + path)
@@ -178,6 +180,8 @@ func load_keyword_rules(path: String = DEFAULT_KEYWORD_RULES_PATH) -> bool:
 	if not (parsed is Dictionary):
 		push_warning("CaseDataLoader: keyword rules root must be Dictionary.")
 		return false
+
+	_parse_keyword_presets(parsed.get("keyword_presets", {}))
 
 	var raw_rules: Variant = parsed.get("keyword_rules", [])
 
@@ -202,6 +206,20 @@ func load_keyword_rules(path: String = DEFAULT_KEYWORD_RULES_PATH) -> bool:
 		push_warning("CaseDataLoader: no actionable keyword connection rules were loaded.")
 
 	return true
+
+
+func get_keyword_presets(node_id: String) -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	var presets_value: Variant = keyword_presets.get(node_id, [])
+
+	if not (presets_value is Array):
+		return result
+
+	for preset_value in presets_value:
+		if preset_value is Dictionary:
+			result.append((preset_value as Dictionary).duplicate(true))
+
+	return result
 
 
 func find_keyword_rule(
@@ -281,6 +299,107 @@ func _append_normalized_keyword_rule(base_rule: Dictionary, connection: Dictiona
 			"feedback": str(connection.get("feedback", "")),
 			"allow_global": allow_global
 		})
+
+
+func _parse_keyword_presets(raw_presets: Variant) -> void:
+	if not (raw_presets is Dictionary):
+		push_warning("CaseDataLoader: keyword_presets must be a Dictionary.")
+		return
+
+	var preset_dictionary: Dictionary = raw_presets
+
+	for raw_node_id in preset_dictionary.keys():
+		var node_id: String = str(raw_node_id)
+		var raw_candidates: Variant = preset_dictionary.get(raw_node_id, [])
+
+		if not (raw_candidates is Array):
+			push_warning("CaseDataLoader: keyword presets for %s must be an Array." % node_id)
+			continue
+
+		var normalized_candidates: Array[Dictionary] = []
+		var seen_candidates: Dictionary = {}
+
+		for raw_candidate in raw_candidates:
+			var keyword: String = ""
+			var anchor_text: String = ""
+			var occurrence_index: int = 0
+
+			if raw_candidate is String:
+				keyword = str(raw_candidate)
+				anchor_text = keyword
+			elif raw_candidate is Dictionary:
+				var candidate_data: Dictionary = raw_candidate
+				var keyword_value: Variant = candidate_data.get("keyword", null)
+				var anchor_value: Variant = candidate_data.get("anchor_text", null)
+
+				if not (keyword_value is String) or not (anchor_value is String):
+					push_warning(
+						"CaseDataLoader: ignored keyword preset with invalid text fields for %s." % node_id
+					)
+					continue
+
+				keyword = str(keyword_value)
+				anchor_text = str(anchor_value)
+				var occurrence_value: Variant = candidate_data.get("occurrence_index", 0)
+
+				if occurrence_value is int:
+					occurrence_index = int(occurrence_value)
+				elif occurrence_value is float:
+					var occurrence_float: float = float(occurrence_value)
+
+					if occurrence_float != floorf(occurrence_float):
+						push_warning(
+							"CaseDataLoader: ignored keyword preset with non-integer occurrence for %s." % node_id
+						)
+						continue
+
+					occurrence_index = int(occurrence_float)
+				else:
+					push_warning(
+						"CaseDataLoader: ignored keyword preset with invalid occurrence for %s." % node_id
+					)
+					continue
+			else:
+				push_warning(
+					"CaseDataLoader: ignored keyword preset with invalid type for %s." % node_id
+				)
+				continue
+
+			var normalized_candidate: String = _normalize_keyword(keyword)
+
+			if normalized_candidate == "" or anchor_text.strip_edges() == "":
+				continue
+
+			if occurrence_index < 0:
+				push_warning(
+					"CaseDataLoader: ignored keyword preset with negative occurrence for %s: %s" % [
+						node_id,
+						normalized_candidate
+					]
+				)
+				continue
+
+			if normalized_candidate.length() > CaseRuntimeState.MAX_KEYWORD_LENGTH:
+				push_warning(
+					"CaseDataLoader: ignored keyword preset over 10 characters for %s: %s" % [
+						node_id,
+						normalized_candidate
+					]
+				)
+				continue
+
+			if seen_candidates.has(normalized_candidate):
+				continue
+
+			seen_candidates[normalized_candidate] = true
+			normalized_candidates.append({
+				"keyword": normalized_candidate,
+				"normalized_keyword": normalized_candidate,
+				"anchor_text": anchor_text,
+				"occurrence_index": occurrence_index
+			})
+
+		keyword_presets[node_id] = normalized_candidates
 
 
 func _normalize_keyword(text: String) -> String:

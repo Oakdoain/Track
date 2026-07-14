@@ -14,6 +14,7 @@ const C_TEXT := Color("#26314C")
 const C_SUBTEXT := Color("#5B6684")
 const C_WHITE := Color("#FFFFFF")
 const C_OVERLAY := Color(0.03, 0.06, 0.15, 0.42)
+const SETTINGS_Z_INDEX := 80
 
 const FONT_SERIF := preload("res://assets/fonts/NotoSerifCJKsc-Regular.otf")
 const FONT_SERIF_SEMIBOLD := preload("res://assets/fonts/NotoSerifCJKsc-SemiBold.otf")
@@ -34,6 +35,7 @@ var _confirmation_body: Label
 var _confirmation_confirm_button: Button
 var _confirmation_cancel_button: Button
 var _confirmation_action: Callable
+var _confirmation_previous_focus: Control
 
 
 func _ready() -> void:
@@ -250,6 +252,7 @@ func _open_settings(origin: String) -> void:
 	if settings_ui != null and is_instance_valid(settings_ui):
 		return
 	_stop_audio()
+	get_viewport().gui_release_focus()
 	_settings_origin = origin
 	settings_ui = SettingsUIScene.instantiate() as CaseSettingsUI
 	if settings_ui == null:
@@ -260,11 +263,15 @@ func _open_settings(origin: String) -> void:
 			main_ui.call("restore_settings_context", origin)
 		return
 	_fill_rect(settings_ui)
+	settings_ui.visible = true
+	settings_ui.mouse_filter = Control.MOUSE_FILTER_STOP
+	settings_ui.z_index = SETTINGS_Z_INDEX
 	add_child(settings_ui)
 	settings_ui.configure(settings_manager, "title" if origin == "title" else "game")
 	settings_ui.return_requested.connect(_close_settings)
 	settings_ui.return_to_title_requested.connect(_request_return_to_title)
 	settings_ui.quit_requested.connect(_request_quit)
+	settings_ui.move_to_front()
 
 
 func _close_settings() -> void:
@@ -343,6 +350,8 @@ func _dispose_load_ui() -> void:
 
 func _dispose_settings_ui() -> void:
 	if settings_ui != null and is_instance_valid(settings_ui):
+		get_viewport().gui_release_focus()
+		settings_ui.visible = false
 		settings_ui.queue_free()
 	settings_ui = null
 
@@ -357,21 +366,27 @@ func _build_confirmation_overlay() -> void:
 	add_child(_confirmation_overlay)
 
 	var shade := ColorRect.new()
+	shade.name = "DimBackground"
 	shade.color = C_OVERLAY
 	shade.mouse_filter = Control.MOUSE_FILTER_STOP
 	_fill_rect(shade)
 	_confirmation_overlay.add_child(shade)
 
 	var center := CenterContainer.new()
+	center.name = "DialogCenter"
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_fill_rect(center)
 	_confirmation_overlay.add_child(center)
 
 	var panel := PanelContainer.new()
+	panel.name = "DialogPanel"
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	panel.custom_minimum_size = Vector2(600, 310)
 	panel.add_theme_stylebox_override("panel", _style_box(C_WHITE, C_BLUE, 1, 4))
 	center.add_child(panel)
 
 	var margin := MarginContainer.new()
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	margin.add_theme_constant_override("margin_left", 38)
 	margin.add_theme_constant_override("margin_right", 38)
 	margin.add_theme_constant_override("margin_top", 32)
@@ -379,6 +394,7 @@ func _build_confirmation_overlay() -> void:
 	panel.add_child(margin)
 
 	var box := VBoxContainer.new()
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	box.add_theme_constant_override("separation", 18)
 	margin.add_child(box)
 	var archive_label := _label("CASE CONFIRMATION", 12, C_SUBTEXT, FONT_MONO)
@@ -391,6 +407,8 @@ func _build_confirmation_overlay() -> void:
 	box.add_child(_confirmation_body)
 
 	var buttons := HBoxContainer.new()
+	buttons.name = "Buttons"
+	buttons.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	buttons.alignment = BoxContainer.ALIGNMENT_END
 	buttons.add_theme_constant_override("separation", 12)
 	box.add_child(buttons)
@@ -403,10 +421,24 @@ func _build_confirmation_overlay() -> void:
 
 
 func _show_confirmation(title: String, body: String, confirm_text: String, action: Callable) -> void:
+	if _confirmation_overlay == null:
+		return
+
+	var focus_owner: Control = get_viewport().gui_get_focus_owner()
+
+	if not _confirmation_overlay.visible and focus_owner != null:
+		_confirmation_previous_focus = focus_owner
+
 	_confirmation_title.text = title
 	_confirmation_body.text = body
 	_confirmation_confirm_button.text = confirm_text
+	_confirmation_confirm_button.disabled = false
+	_confirmation_cancel_button.disabled = false
 	_confirmation_action = action
+	# SettingsUI and title LoadUI are created after this reusable overlay. Moving
+	# the overlay to the end of AppRoot's child list makes its visual and GUI
+	# input order explicit instead of relying on z_index alone.
+	_confirmation_overlay.move_to_front()
 	_confirmation_overlay.visible = true
 	_confirmation_cancel_button.call_deferred("grab_focus")
 
@@ -414,8 +446,20 @@ func _show_confirmation(title: String, body: String, confirm_text: String, actio
 func _close_confirmation() -> void:
 	if _confirmation_overlay == null:
 		return
+
+	var was_visible: bool = _confirmation_overlay.visible
 	_confirmation_overlay.visible = false
 	_confirmation_action = Callable()
+
+	if (
+		was_visible
+		and _confirmation_previous_focus != null
+		and is_instance_valid(_confirmation_previous_focus)
+		and _confirmation_previous_focus.is_visible_in_tree()
+	):
+		_confirmation_previous_focus.call_deferred("grab_focus")
+
+	_confirmation_previous_focus = null
 
 
 func _execute_confirmation() -> void:
@@ -428,6 +472,8 @@ func _dialog_button(text: String, primary: bool) -> Button:
 	var button := Button.new()
 	button.text = text
 	button.custom_minimum_size = Vector2(170, 48)
+	button.mouse_filter = Control.MOUSE_FILTER_STOP
+	button.disabled = false
 	button.focus_mode = Control.FOCUS_ALL
 	button.add_theme_font_override("font", FONT_SERIF_SEMIBOLD)
 	button.add_theme_font_size_override("font_size", 16)
@@ -451,6 +497,7 @@ func _button_box(background: Color, border: Color, width: int = 1) -> StyleBoxFl
 
 func _label(text: String, font_size: int, color: Color, font: Font) -> Label:
 	var label := Label.new()
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	label.text = text
 	label.add_theme_font_override("font", font)
 	label.add_theme_font_size_override("font_size", font_size)

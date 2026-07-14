@@ -1,4 +1,94 @@
 {
+	"keyword_presets": {
+		"node_0024": [
+			{
+				"keyword": "结构图",
+				"anchor_text": "结构图",
+				"occurrence_index": 0
+			},
+			{
+				"keyword": "控制室",
+				"anchor_text": "控制室",
+				"occurrence_index": 0
+			},
+			{
+				"keyword": "人声棚",
+				"anchor_text": "人声棚",
+				"occurrence_index": 0
+			},
+			{
+				"keyword": "外侧通道",
+				"anchor_text": "外侧通道",
+				"occurrence_index": 0
+			}
+		],
+		"node_0025": [
+			{
+				"keyword": "厚毯",
+				"anchor_text": "厚毯",
+				"occurrence_index": 0
+			},
+			{
+				"keyword": "鞋跟声",
+				"anchor_text": "鞋跟声",
+				"occurrence_index": 0
+			},
+			{
+				"keyword": "脚步声",
+				"anchor_text": "脚步声",
+				"occurrence_index": 0
+			},
+			{
+				"keyword": "人声棚",
+				"anchor_text": "人声棚",
+				"occurrence_index": 0
+			}
+		],
+		"node_0028": [
+			{
+				"keyword": "门缝",
+				"anchor_text": "门缝",
+				"occurrence_index": 0
+			},
+			{
+				"keyword": "胶条",
+				"anchor_text": "胶条",
+				"occurrence_index": 0
+			},
+			{
+				"keyword": "水磨石",
+				"anchor_text": "水磨石",
+				"occurrence_index": 0
+			},
+			{
+				"keyword": "瞬态声",
+				"anchor_text": "瞬态声",
+				"occurrence_index": 0
+			}
+		],
+		"node_0029": [
+			{
+				"keyword": "走廊回声",
+				"anchor_text": "走廊回声",
+				"occurrence_index": 0
+			},
+			{
+				"keyword": "短促反射",
+				"anchor_text": "短促反射",
+				"occurrence_index": 0
+			},
+			{
+				"keyword": "传声路径",
+				"anchor_text": "传声路径",
+				"occurrence_index": 0
+			},
+			{
+				"keyword": "人声棚",
+				"anchor_text": "人声棚",
+				"occurrence_index": 0
+			}
+		]
+	},
 	"keyword_rules": [
 		{
 			"keyword": "控制室",

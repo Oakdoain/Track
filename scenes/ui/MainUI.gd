@@ -24,10 +24,13 @@ const KEYWORD_GRAPH_MIN_SIZE := Vector2(150, 36)
 const KEYWORD_GRAPH_MAX_WIDTH := 220.0
 const KEYWORD_GRAPH_OFFSET := 20.0
 const KEYWORD_GRAPH_GAP := 8.0
-const KEYWORD_ACTION_SIZE := Vector2(176, 42)
 const GRAPH_STATUS_SIZE := Vector2(340, 76)
 const CASE_AUDIO_DATA_PATH := "res://data/cases/case_01/control_backup/audio_clues.json"
 const CASE_STATUS_SIZE := Vector2(380, 48)
+const KEYWORD_META_PREFIX := "keyword://"
+const KEYWORD_POPUP_MAX_WIDTH := 220.0
+const KEYWORD_POPUP_OFFSET := Vector2(16.0, 16.0)
+const KEYWORD_POPUP_VIEW_MARGIN := 8.0
 
 const TOP_BAR_MARGIN_LEFT := 24
 const TOP_BAR_MARGIN_RIGHT := 24
@@ -92,6 +95,8 @@ var save_view: Control
 var load_view: Control
 var _data_page_open: bool = false
 var _return_to_graph_view: bool = false
+var _settings_source_context: String = ""
+var _settings_previous_focus: Control
 
 var chapter_small_label: Label
 var chapter_dropdown: OptionButton
@@ -119,6 +124,7 @@ var quote_panel: PanelContainer
 var quote_label: Label
 var choice_title_label: Label
 var choice_list: VBoxContainer
+var keyword_popup_node: PanelContainer
 
 var graph_scroll: ScrollContainer
 var graph_canvas: CaseGraphCanvas
@@ -127,12 +133,6 @@ var graph_status_label: Label
 var _selected_keyword_instance_id: String = ""
 var _graph_feedback_generation: int = 0
 var _keyword_graph_layout: Dictionary = {}
-
-var keyword_action_panel: PanelContainer
-var keyword_action_button: Button
-var _pending_keyword_text: String = ""
-var _pending_keyword_source_node_id: String = ""
-var _keyword_feedback_generation: int = 0
 
 var current_node_title: Label
 var current_node_body: Label
@@ -223,22 +223,6 @@ func _input(event: InputEvent) -> void:
 
 		return
 
-	if not (event is InputEventMouseButton):
-		return
-
-	var mouse_event: InputEventMouseButton = event as InputEventMouseButton
-
-	if mouse_event.button_index != MOUSE_BUTTON_LEFT or not mouse_event.pressed:
-		return
-
-	if keyword_action_panel == null or not keyword_action_panel.visible:
-		return
-
-	var mouse_position: Vector2 = get_viewport().get_mouse_position()
-
-	if not keyword_action_panel.get_global_rect().has_point(mouse_position):
-		_hide_keyword_action()
-
 
 func _setup_window() -> void:
 	var window: Window = get_window()
@@ -308,9 +292,6 @@ func _build_ui() -> void:
 	var center_panel: Control = _build_center_panel()
 	root.add_child(center_panel)
 	_dock_center(center_panel, LEFT_PANEL_WIDTH, RIGHT_PANEL_WIDTH, TOP_BAR_HEIGHT)
-
-	keyword_action_panel = _build_keyword_action_panel()
-	root.add_child(keyword_action_panel)
 
 	case_status_panel = _build_case_status_panel()
 	root.add_child(case_status_panel)
@@ -557,14 +538,16 @@ func _build_center_panel() -> Control:
 	story_body_label.fit_content = true
 	story_body_label.bbcode_enabled = true
 	story_body_label.scroll_active = false
-	story_body_label.selection_enabled = true
+	story_body_label.selection_enabled = false
 	story_body_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	story_body_label.add_theme_font_override("normal_font", FONT_SERIF_REGULAR)
 	story_body_label.add_theme_font_override("bold_font", FONT_SERIF_SEMIBOLD)
 	story_body_label.add_theme_color_override("default_color", C_TEXT)
 	story_body_label.add_theme_font_size_override("normal_font_size", 18)
 	story_body_label.add_theme_constant_override("line_separation", 4)
-	story_body_label.gui_input.connect(_on_story_body_gui_input)
+	story_body_label.meta_clicked.connect(_on_story_keyword_meta_clicked)
+	story_body_label.meta_hover_started.connect(_on_story_keyword_meta_hover_started)
+	story_body_label.meta_hover_ended.connect(_on_story_keyword_meta_hover_ended)
 	outer.add_child(story_body_label)
 
 	quote_panel = PanelContainer.new()
@@ -648,44 +631,6 @@ func _build_graph_status_panel() -> PanelContainer:
 	graph_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	graph_status_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	margin.add_child(graph_status_label)
-	return panel
-
-
-func _build_keyword_action_panel() -> PanelContainer:
-	var panel := PanelContainer.new()
-	panel.name = "KeywordActionPanel"
-	panel.visible = false
-	panel.z_index = 100
-	panel.custom_minimum_size = KEYWORD_ACTION_SIZE
-	panel.size = KEYWORD_ACTION_SIZE
-	panel.mouse_filter = Control.MOUSE_FILTER_STOP
-	panel.add_theme_stylebox_override("panel", _style_box(C_WHITE, C_BLUE, 1, 4))
-
-	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 4)
-	margin.add_theme_constant_override("margin_right", 4)
-	margin.add_theme_constant_override("margin_top", 4)
-	margin.add_theme_constant_override("margin_bottom", 4)
-	panel.add_child(margin)
-
-	keyword_action_button = Button.new()
-	keyword_action_button.text = "提取为关键词"
-	keyword_action_button.focus_mode = Control.FOCUS_NONE
-	keyword_action_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	keyword_action_button.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	keyword_action_button.add_theme_font_override("font", FONT_SERIF_SEMIBOLD)
-	keyword_action_button.add_theme_font_size_override("font_size", 15)
-	keyword_action_button.add_theme_color_override("font_color", C_BLUE)
-	keyword_action_button.add_theme_color_override("font_hover_color", C_BLUE)
-	keyword_action_button.add_theme_color_override("font_pressed_color", C_WHITE)
-	keyword_action_button.add_theme_color_override("font_disabled_color", C_SUBTEXT)
-	keyword_action_button.add_theme_stylebox_override("normal", _style_box(Color.TRANSPARENT, Color.TRANSPARENT, 0, 3))
-	keyword_action_button.add_theme_stylebox_override("hover", _style_box(C_PANEL_SOFT, Color.TRANSPARENT, 0, 3))
-	keyword_action_button.add_theme_stylebox_override("pressed", _style_box(C_BLUE, C_BLUE, 1, 3))
-	keyword_action_button.add_theme_stylebox_override("disabled", _style_box(C_PANEL_SOFT, Color.TRANSPARENT, 0, 3))
-	keyword_action_button.pressed.connect(_on_extract_keyword_pressed)
-	margin.add_child(keyword_action_button)
-
 	return panel
 
 
@@ -968,137 +913,327 @@ func _render_node(node_data: Dictionary) -> void:
 
 func _render_story_body(node_data: Dictionary) -> void:
 	story_body_label.clear()
+	story_body_label.tooltip_text = ""
+	var source_node_id: String = str(node_data.get("node_id", runtime_state.current_node_id))
+	var body_text: String = _get_story_body_text(node_data.get("body", []))
+	var keyword_ranges: Array[Dictionary] = _build_story_keyword_ranges(
+		source_node_id,
+		body_text
+	)
+	var cursor: int = 0
 
-	var body: Variant = node_data.get("body", [])
+	for keyword_range in keyword_ranges:
+		var range_start: int = int(keyword_range.get("start", 0))
+		var range_end: int = int(keyword_range.get("end", range_start))
 
-	if body is Array:
-		for index in range(body.size()):
-			story_body_label.append_text(str(body[index]))
+		if range_start > cursor:
+			story_body_label.add_text(body_text.substr(cursor, range_start - cursor))
 
-			if index < body.size() - 1:
-				story_body_label.append_text("\n\n")
-	else:
-		story_body_label.append_text(str(body))
+		_append_story_keyword_segment(
+			source_node_id,
+			int(keyword_range.get("preset_index", -1)),
+			keyword_range.get("preset", {}),
+			body_text.substr(range_start, range_end - range_start)
+		)
+		cursor = range_end
+
+	if cursor < body_text.length():
+		story_body_label.add_text(body_text.substr(cursor))
 
 	var quote_text: String = str(node_data.get("quote", ""))
 	quote_panel.visible = quote_text != ""
 	quote_label.text = quote_text
 
 
-func _on_story_body_gui_input(event: InputEvent) -> void:
-	if not (event is InputEventMouseButton):
+func _get_story_body_text(body: Variant) -> String:
+	if not (body is Array):
+		return str(body)
+
+	var paragraphs: PackedStringArray = []
+
+	for paragraph in body:
+		paragraphs.append(str(paragraph))
+
+	return "\n\n".join(paragraphs)
+
+
+func _build_story_keyword_ranges(source_node_id: String, body_text: String) -> Array[Dictionary]:
+	var ranges: Array[Dictionary] = []
+	var presets: Array[Dictionary] = loader.get_keyword_presets(source_node_id)
+
+	for preset_index in range(presets.size()):
+		var preset: Dictionary = presets[preset_index]
+		var anchor_text: String = str(preset.get("anchor_text", ""))
+		var occurrence_index: int = int(preset.get("occurrence_index", 0))
+		var range_start: int = _find_text_occurrence(body_text, anchor_text, occurrence_index)
+
+		if range_start < 0:
+			push_warning(
+				"MainUI: skipped keyword anchor absent from %s body: %s occurrence %d" % [
+					source_node_id,
+					anchor_text,
+					occurrence_index
+				]
+			)
+			continue
+
+		ranges.append({
+			"start": range_start,
+			"end": range_start + anchor_text.length(),
+			"preset_index": preset_index,
+			"preset": preset
+		})
+
+	ranges.sort_custom(_sort_story_keyword_range)
+	var non_overlapping_ranges: Array[Dictionary] = []
+	var previous_end: int = -1
+
+	for keyword_range in ranges:
+		var range_start: int = int(keyword_range.get("start", -1))
+
+		if range_start < previous_end:
+			var preset: Dictionary = keyword_range.get("preset", {})
+			push_warning(
+				"MainUI: skipped overlapping keyword anchor for %s: %s" % [
+					source_node_id,
+					str(preset.get("anchor_text", ""))
+				]
+			)
+			continue
+
+		non_overlapping_ranges.append(keyword_range)
+		previous_end = int(keyword_range.get("end", previous_end))
+
+	return non_overlapping_ranges
+
+
+func _find_text_occurrence(text: String, anchor_text: String, occurrence_index: int) -> int:
+	if anchor_text == "" or occurrence_index < 0:
+		return -1
+
+	var search_from: int = 0
+	var found_at: int = -1
+
+	for _occurrence in range(occurrence_index + 1):
+		found_at = text.find(anchor_text, search_from)
+
+		if found_at < 0:
+			return -1
+
+		search_from = found_at + anchor_text.length()
+
+	return found_at
+
+
+func _sort_story_keyword_range(left: Dictionary, right: Dictionary) -> bool:
+	return int(left.get("start", 0)) < int(right.get("start", 0))
+
+
+func _append_story_keyword_segment(
+	source_node_id: String,
+	preset_index: int,
+	preset_value: Variant,
+	display_text: String
+) -> void:
+	if not (preset_value is Dictionary):
+		story_body_label.add_text(display_text)
 		return
 
-	var mouse_event: InputEventMouseButton = event as InputEventMouseButton
+	var preset: Dictionary = preset_value
+	var keyword: String = str(preset.get("keyword", ""))
+	var extracted: bool = runtime_state.has_keyword(keyword, source_node_id)
+	var meta_value: String = "%s%s/%d" % [KEYWORD_META_PREFIX, source_node_id, preset_index]
+	story_body_label.push_meta(meta_value)
+	story_body_label.push_underline()
+	story_body_label.push_color(C_BLUE if extracted else C_TEXT)
+	story_body_label.add_text(display_text)
+	story_body_label.pop()
+	story_body_label.pop()
+	story_body_label.pop()
 
-	if mouse_event.button_index != MOUSE_BUTTON_LEFT or mouse_event.pressed:
+
+func _on_story_keyword_meta_clicked(meta_value: Variant) -> void:
+	var preset: Dictionary = _resolve_story_keyword_meta(meta_value)
+
+	if preset.is_empty():
+		push_warning("MainUI: ignored invalid story keyword meta.")
 		return
 
-	call_deferred(
-		"_update_keyword_action_from_selection",
-		get_viewport().get_mouse_position(),
-		runtime_state.current_node_id
+	var source_node_id: String = runtime_state.current_node_id
+	var keyword: String = str(preset.get("keyword", ""))
+	var popup_position: Vector2 = story_view.get_local_mouse_position()
+
+	if runtime_state.has_keyword(keyword, source_node_id):
+		_show_keyword_popup(keyword, true, popup_position)
+		return
+
+	var result: Dictionary = runtime_state.add_keyword(keyword, source_node_id)
+
+	if not bool(result.get("added", false)):
+		var reason: String = str(result.get("reason", ""))
+
+		if reason == "duplicate":
+			_show_keyword_popup(keyword, true, popup_position)
+			return
+
+		push_warning("MainUI: failed to add configured inline keyword: %s (%s)" % [keyword, reason])
+		return
+
+	_refresh_keyword_grid()
+	_render_graph_view()
+	var current_node_data: Dictionary = loader.get_node(source_node_id)
+
+	if not current_node_data.is_empty():
+		_render_story_body(current_node_data)
+
+	_show_keyword_popup(keyword, false, popup_position)
+
+
+func _resolve_story_keyword_meta(meta_value: Variant) -> Dictionary:
+	if not (meta_value is String):
+		return {}
+
+	var meta_text: String = str(meta_value)
+
+	if not meta_text.begins_with(KEYWORD_META_PREFIX):
+		return {}
+
+	var payload: String = meta_text.trim_prefix(KEYWORD_META_PREFIX)
+	var parts: PackedStringArray = payload.split("/", false)
+
+	if parts.size() != 2 or not parts[1].is_valid_int():
+		return {}
+
+	var source_node_id: String = parts[0]
+
+	if source_node_id != runtime_state.current_node_id:
+		return {}
+
+	var preset_index: int = int(parts[1])
+	var presets: Array[Dictionary] = loader.get_keyword_presets(source_node_id)
+
+	if preset_index < 0 or preset_index >= presets.size():
+		return {}
+
+	var expected_meta: String = "%s%s/%d" % [
+		KEYWORD_META_PREFIX,
+		source_node_id,
+		preset_index
+	]
+
+	if meta_text != expected_meta:
+		return {}
+
+	return presets[preset_index].duplicate(true)
+
+
+func _on_story_keyword_meta_hover_started(meta_value: Variant) -> void:
+	var preset: Dictionary = _resolve_story_keyword_meta(meta_value)
+
+	if preset.is_empty():
+		story_body_label.tooltip_text = ""
+		story_body_label.mouse_default_cursor_shape = Control.CURSOR_ARROW
+		return
+
+	var keyword: String = str(preset.get("keyword", ""))
+	story_body_label.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	story_body_label.tooltip_text = (
+		"已提取"
+		if runtime_state.has_keyword(keyword, runtime_state.current_node_id)
+		else "点击提取关键词：" + keyword
 	)
 
 
-func _update_keyword_action_from_selection(mouse_position: Vector2, source_node_id: String) -> void:
-	if not story_view.visible or source_node_id != runtime_state.current_node_id:
-		_hide_keyword_action()
-		return
-
-	var selected_text: String = story_body_label.get_selected_text()
-	var normalized_text: String = runtime_state.normalize_keyword_text(selected_text)
-
-	if normalized_text == "":
-		_hide_keyword_action()
-		return
-
-	_pending_keyword_text = selected_text
-	_pending_keyword_source_node_id = source_node_id
-	_keyword_feedback_generation += 1
-	_position_keyword_action(mouse_position)
-	keyword_action_panel.visible = true
-
-	if normalized_text.length() > CaseRuntimeState.MAX_KEYWORD_LENGTH:
-		_show_keyword_feedback("关键词不能超过 10 个字")
-		return
-
-	keyword_action_button.text = "提取为关键词"
-	keyword_action_button.disabled = false
+func _on_story_keyword_meta_hover_ended(_meta_value: Variant) -> void:
+	story_body_label.tooltip_text = ""
+	story_body_label.mouse_default_cursor_shape = Control.CURSOR_ARROW
 
 
-func _position_keyword_action(mouse_position: Vector2) -> void:
-	var viewport_size: Vector2 = get_viewport_rect().size
-	var panel_size: Vector2 = KEYWORD_ACTION_SIZE
-	var target_position := mouse_position + Vector2(12.0, 12.0)
-
-	if target_position.y + panel_size.y > viewport_size.y - 8.0:
-		target_position.y = mouse_position.y - panel_size.y - 12.0
-
-	target_position.x = clampf(target_position.x, 8.0, viewport_size.x - panel_size.x - 8.0)
-	target_position.y = clampf(
-		target_position.y,
-		float(TOP_BAR_HEIGHT) + 8.0,
-		viewport_size.y - panel_size.y - 8.0
+func _show_keyword_popup(keyword: String, already_extracted: bool, click_position: Vector2) -> void:
+	_clear_keyword_popup()
+	var popup := PanelContainer.new()
+	popup.name = "KeywordPopupNode"
+	popup.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	popup.z_index = 120
+	var popup_width: float = minf(
+		KEYWORD_POPUP_MAX_WIDTH,
+		maxf(124.0, 70.0 + float(keyword.length()) * 18.0)
 	)
-	keyword_action_panel.position = target_position
+	var popup_size := Vector2(popup_width, 42.0)
+	popup.custom_minimum_size = popup_size
+	popup.size = popup_size
+	popup.add_theme_stylebox_override("panel", _style_box(C_PANEL_SOFT, C_BLUE, 1, 4))
+	story_view.add_child(popup)
+	keyword_popup_node = popup
 
+	var margin := MarginContainer.new()
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	margin.add_theme_constant_override("margin_left", 12)
+	margin.add_theme_constant_override("margin_right", 12)
+	margin.add_theme_constant_override("margin_top", 7)
+	margin.add_theme_constant_override("margin_bottom", 7)
+	popup.add_child(margin)
+	var row := HBoxContainer.new()
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_theme_constant_override("separation", 7)
+	margin.add_child(row)
+	var marker := _label("●" if already_extracted else "◇", 13, C_BLUE, FONT_MONO_MEDIUM)
+	marker.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	marker.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	row.add_child(marker)
+	var text_label := _label(keyword, 15, C_BLUE, FONT_SERIF_SEMIBOLD)
+	text_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	text_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	text_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	text_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	text_label.tooltip_text = keyword
+	row.add_child(text_label)
 
-func _on_extract_keyword_pressed() -> void:
-	if _pending_keyword_text.strip_edges() == "" or _pending_keyword_source_node_id == "":
-		_hide_keyword_action()
-		return
-
-	var normalized_text: String = runtime_state.normalize_keyword_text(_pending_keyword_text)
-
-	if normalized_text.length() > CaseRuntimeState.MAX_KEYWORD_LENGTH:
-		_show_keyword_feedback("关键词不能超过 10 个字")
-		return
-
-	var result: Dictionary = runtime_state.add_keyword(
-		_pending_keyword_text,
-		_pending_keyword_source_node_id
+	var requested_position: Vector2 = click_position + KEYWORD_POPUP_OFFSET
+	var max_position := Vector2(
+		maxf(KEYWORD_POPUP_VIEW_MARGIN, story_view.size.x - popup_size.x - KEYWORD_POPUP_VIEW_MARGIN),
+		maxf(KEYWORD_POPUP_VIEW_MARGIN, story_view.size.y - popup_size.y - KEYWORD_POPUP_VIEW_MARGIN)
 	)
-	var added: bool = bool(result.get("added", false))
+	popup.position = Vector2(
+		clampf(requested_position.x, KEYWORD_POPUP_VIEW_MARGIN, max_position.x),
+		clampf(requested_position.y, KEYWORD_POPUP_VIEW_MARGIN, max_position.y)
+	)
+	popup.pivot_offset = popup_size * 0.5
+	popup.scale = Vector2(0.94, 0.94)
+	popup.modulate = Color(1.0, 1.0, 1.0, 0.0)
+	var popup_tween: Tween = create_tween().bind_node(popup)
+	popup_tween.set_trans(Tween.TRANS_QUAD)
+	popup_tween.set_ease(Tween.EASE_OUT)
+	popup_tween.tween_property(popup, "modulate:a", 1.0, 0.09)
+	popup_tween.parallel().tween_property(popup, "scale", Vector2.ONE, 0.09)
+	popup_tween.tween_interval(0.7)
+	popup_tween.tween_property(popup, "modulate:a", 0.0, 0.18)
+	popup_tween.parallel().tween_property(popup, "position:y", popup.position.y - 6.0, 0.18)
+	popup_tween.tween_callback(_finish_keyword_popup.bind(popup))
 
-	if added:
-		_refresh_keyword_grid()
-		_render_graph_view()
-		_show_keyword_feedback("已提取关键词")
+
+func _finish_keyword_popup(popup: PanelContainer) -> void:
+	if not is_instance_valid(popup):
 		return
 
-	if str(result.get("reason", "")) == "duplicate":
-		_show_keyword_feedback("关键词已提取")
-		return
+	if keyword_popup_node == popup:
+		keyword_popup_node = null
 
-	if str(result.get("reason", "")) == "too_long":
-		_show_keyword_feedback("关键词不能超过 10 个字")
-		return
-
-	_hide_keyword_action()
+	popup.queue_free()
 
 
-func _show_keyword_feedback(text: String) -> void:
-	_keyword_feedback_generation += 1
-	var feedback_generation: int = _keyword_feedback_generation
-	keyword_action_button.text = text
-	keyword_action_button.disabled = true
-	await get_tree().create_timer(0.9).timeout
+func _clear_keyword_popup() -> void:
+	if keyword_popup_node != null and is_instance_valid(keyword_popup_node):
+		keyword_popup_node.queue_free()
 
-	if feedback_generation == _keyword_feedback_generation:
-		_hide_keyword_action()
+	keyword_popup_node = null
 
 
 func _hide_keyword_action() -> void:
-	_keyword_feedback_generation += 1
-	_pending_keyword_text = ""
-	_pending_keyword_source_node_id = ""
-
-	if keyword_action_panel != null:
-		keyword_action_panel.visible = false
-
 	if story_body_label != null:
 		story_body_label.deselect()
+
+	_clear_keyword_popup()
 
 
 func _refresh_keyword_grid() -> void:
@@ -2506,16 +2641,30 @@ func _set_nav_button_active(nav_button: Control, active: bool) -> void:
 
 
 func _open_settings_page() -> void:
+	if _settings_source_context != "":
+		return
+
 	var source_context: String = _get_active_page_context()
+	_settings_source_context = source_context
+	_settings_previous_focus = get_viewport().gui_get_focus_owner()
 	_stop_audio_for_context_change()
 	_hide_keyword_action()
 	_cancel_keyword_connection_selection(false)
+	_suspend_data_page_for_settings(source_context)
+	get_viewport().gui_release_focus()
 	_set_nav_button_active(story_nav_button, false)
 	_set_nav_button_active(graph_nav_button, false)
 	_set_nav_button_active(save_nav_button, false)
 	_set_nav_button_active(load_nav_button, false)
 	_set_nav_button_active(settings_nav_button, true)
 	settings_requested.emit(source_context)
+
+
+func _suspend_data_page_for_settings(source_context: String) -> void:
+	if source_context == "save" and save_view != null:
+		save_view.call("suspend_for_settings")
+	elif source_context == "load" and load_view != null:
+		load_view.call("suspend_for_settings")
 
 
 func _get_active_page_context() -> String:
@@ -2530,11 +2679,31 @@ func _get_active_page_context() -> String:
 
 
 func restore_settings_context(source_context: String) -> void:
+	if source_context == "save" and save_view != null:
+		save_view.call("resume_from_settings")
+	elif source_context == "load" and load_view != null:
+		load_view.call("resume_from_settings")
+
 	_set_nav_button_active(settings_nav_button, false)
 	_set_nav_button_active(story_nav_button, source_context == "story")
 	_set_nav_button_active(graph_nav_button, source_context == "graph")
 	_set_nav_button_active(save_nav_button, source_context == "save")
 	_set_nav_button_active(load_nav_button, source_context == "load")
+	_settings_source_context = ""
+	_restore_settings_previous_focus()
+
+
+func _restore_settings_previous_focus() -> void:
+	var focus_target: Control = _settings_previous_focus
+	_settings_previous_focus = null
+
+	if (
+		focus_target != null
+		and is_instance_valid(focus_target)
+		and focus_target.is_visible_in_tree()
+		and focus_target.focus_mode != Control.FOCUS_NONE
+	):
+		focus_target.call_deferred("grab_focus")
 
 
 func _open_save_page() -> void:
