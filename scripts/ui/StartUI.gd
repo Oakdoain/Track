@@ -29,7 +29,7 @@ const ICON_FOLDER := preload("res://assets/icons/lucide/folder-open.svg")
 const ICON_SETTINGS := preload("res://assets/icons/lucide/settings.svg")
 const ICON_POWER := preload("res://assets/icons/lucide/power.svg")
 
-var save_manager: SaveManager
+var _continue_summary: Dictionary = {}
 var new_game_button: Button
 var continue_button: Button
 var summary_status_label: Label
@@ -44,16 +44,21 @@ func _ready() -> void:
 	call_deferred("_apply_default_menu_focus")
 
 
-func configure(manager: SaveManager) -> void:
-	save_manager = manager
+func configure(continue_summary: Dictionary) -> void:
+	_continue_summary = continue_summary.duplicate(true)
+	refresh_autosave_summary()
+
+
+func set_continue_summary(continue_summary: Dictionary) -> void:
+	_continue_summary = continue_summary.duplicate(true)
 	refresh_autosave_summary()
 
 
 func refresh_autosave_summary() -> void:
-	if save_manager == null or summary_status_label == null:
+	if summary_status_label == null:
 		return
 
-	var summary: Dictionary = save_manager.read_slot_summary("autosave", 0)
+	var summary: Dictionary = _continue_summary
 	var status: String = str(summary.get("status", "empty"))
 	var available: bool = status == "available"
 	continue_button.disabled = not available
@@ -61,10 +66,11 @@ func refresh_autosave_summary() -> void:
 	if available:
 		var metadata_value: Variant = summary.get("metadata", {})
 		var metadata: Dictionary = metadata_value if metadata_value is Dictionary else {}
+		var case_title: String = str(summary.get("case_title", ""))
 		var node_title: String = str(metadata.get("node_title", "可继续的案件节点"))
 		summary_status_label.text = "可继续"
-		summary_title_label.text = node_title
-		summary_title_label.tooltip_text = node_title
+		summary_title_label.text = "%s · %s" % [case_title, node_title] if case_title != "" else node_title
+		summary_title_label.tooltip_text = summary_title_label.text
 		summary_time_label.text = str(summary.get("saved_at_text", ""))
 	elif status == "corrupted":
 		summary_status_label.text = "自动存档损坏"

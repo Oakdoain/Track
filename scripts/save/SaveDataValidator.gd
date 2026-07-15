@@ -2,8 +2,14 @@ extends RefCounted
 class_name SaveDataValidator
 
 const SUPPORTED_FORMAT_VERSION := 1
-const CASE_ID := "case_01"
-const SLICE_ID := "control_backup"
+
+var expected_case_id: String = "case_01"
+var expected_slice_id: String = "control_backup"
+
+
+func _init(case_id: String = "case_01", slice_id: String = "control_backup") -> void:
+	expected_case_id = case_id
+	expected_slice_id = slice_id
 
 
 func validate_document(
@@ -24,10 +30,10 @@ func validate_document(
 	if format_version != SUPPORTED_FORMAT_VERSION:
 		return _failure("incompatible", "不支持的存档格式版本：%d" % format_version)
 
-	if not (data.get("case_id", "") is String) or str(data.get("case_id", "")) != CASE_ID:
+	if not (data.get("case_id", "") is String) or str(data.get("case_id", "")) != expected_case_id:
 		return _failure("corrupted", "存档案件标识无效")
 
-	if not (data.get("slice_id", "") is String) or str(data.get("slice_id", "")) != SLICE_ID:
+	if not (data.get("slice_id", "") is String) or str(data.get("slice_id", "")) != expected_slice_id:
 		return _failure("corrupted", "存档切片标识无效")
 
 	var slot_type_value: Variant = data.get("slot_type")

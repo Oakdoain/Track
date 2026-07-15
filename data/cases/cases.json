@@ -1,0 +1,32 @@
+{
+	"cases": [
+		{
+			"case_id": "tutorial_00",
+			"slice_id": "archive_training",
+			"order": 0,
+			"code": "T-00",
+			"title": "教学档案：被重新封存的卷宗",
+			"short_title": "被重新封存的卷宗",
+			"subtitle": "ARCHIVE TRAINING FILE",
+			"case_type": "tutorial",
+			"estimated_time": "8—12 分钟",
+			"data_path": "res://data/cases/tutorial_00/archive_training",
+			"completion_flag": "tutorial_completed",
+			"recommended": true
+		},
+		{
+			"case_id": "case_01",
+			"slice_id": "control_backup",
+			"order": 1,
+			"code": "CASE 01",
+			"title": "隔音室谋杀案",
+			"short_title": "控制室备份录音",
+			"subtitle": "THE SOUNDPROOF ROOM MURDER",
+			"case_type": "case",
+			"estimated_time": "开发中",
+			"data_path": "res://data/cases/case_01/control_backup",
+			"completion_flag": "",
+			"recommended": false
+		}
+	]
+}

@@ -41,6 +41,7 @@ const ICON_FOLDER_OPEN := preload("res://assets/icons/lucide/folder-open.svg")
 const ICON_STEP_BACK := preload("res://assets/icons/lucide/step-back.svg")
 
 var save_manager: SaveManager
+var case_descriptor: Dictionary = {}
 var current_page_index: int = 0
 var selected_slot_type: String = ""
 var selected_slot_index: int = -1
@@ -61,6 +62,7 @@ var selected_title_label: Label
 var selected_chapter_label: Label
 var selected_time_label: Label
 var selected_status_label: Label
+var case_context_label: Label
 
 
 func _ready() -> void:
@@ -70,8 +72,10 @@ func _ready() -> void:
 	call_deferred("_update_content_width")
 
 
-func configure(manager: SaveManager) -> void:
+func configure(manager: SaveManager, descriptor: Dictionary = {}) -> void:
 	save_manager = manager
+	case_descriptor = descriptor.duplicate(true)
+	_refresh_case_context_label()
 
 
 func open_page() -> void:
@@ -200,7 +204,8 @@ func _build_page_header() -> Control:
 	title_box.add_theme_constant_override("separation", 0)
 	header.add_child(title_box)
 	title_box.add_child(_label("读取存档", 30, C_BLUE, FONT_SERIF_SEMIBOLD))
-	title_box.add_child(_label("LOAD ARCHIVE", 12, C_SUBTEXT, FONT_MONO_REGULAR))
+	case_context_label = _label("LOAD ARCHIVE", 12, C_SUBTEXT, FONT_MONO_REGULAR)
+	title_box.add_child(case_context_label)
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(spacer)
@@ -208,6 +213,16 @@ func _build_page_header() -> Control:
 	page_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	header.add_child(page_label)
 	return header
+
+
+func _refresh_case_context_label() -> void:
+	if case_context_label == null or case_descriptor.is_empty():
+		return
+
+	case_context_label.text = "%s / %s" % [
+		str(case_descriptor.get("code", "CASE")),
+		str(case_descriptor.get("title", "案件"))
+	]
 
 
 func _build_list_heading() -> Control:

@@ -1,0 +1,19 @@
+{
+	"audio_clues": [
+		{
+			"id": "audio_tutorial",
+			"title": "教程音频",
+			"file": "res://data/audio/clues/tutorial.ogg",
+			"waveform_file": "res://data/audio/clues/tutorial_waveform.json",
+			"track_label": "Track 00",
+			"display_name": "教程音频",
+			"display_subtitle": "(Tutorial Audio)",
+			"duration": 27.096236,
+			"type": "教程音频",
+			"source": "档案库教学",
+			"summary": "用于教学档案界面演示的音频。",
+			"source_node": "",
+			"important_timestamps": []
+		}
+	]
+}

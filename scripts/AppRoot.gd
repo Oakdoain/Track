@@ -4,6 +4,7 @@ const MainUIScene := preload("res://scenes/ui/MainUI.tscn")
 const StartUIScene := preload("res://scenes/ui/StartUI.tscn")
 const LoadUIScene := preload("res://scenes/ui/LoadUI.tscn")
 const SettingsUIScene := preload("res://scenes/ui/SettingsUI.tscn")
+const ArchiveUIScene := preload("res://scenes/ui/ArchiveUI.tscn")
 
 const MIN_WINDOW_SIZE := Vector2i(1280, 720)
 const C_BG := Color("#F7F9FF")
@@ -21,14 +22,23 @@ const FONT_SERIF_SEMIBOLD := preload("res://assets/fonts/NotoSerifCJKsc-SemiBold
 const FONT_MONO := preload("res://assets/fonts/IBMPlexMono-Medium.ttf")
 
 var save_manager: SaveManager
+var registry_loader: CaseDataLoader
+var registered_cases: Array[Dictionary] = []
+var save_managers: Dictionary = {}
+var case_progress_manager: CaseProgressManager
 var settings_manager: SettingsManager
 var start_ui: CaseStartUI
+var archive_ui: CaseArchiveUI
 var main_ui: Control
 var load_ui: CaseLoadUI
 var settings_ui: CaseSettingsUI
 
 var _settings_origin: String = "title"
 var _pending_entry_source: String = ""
+var _current_case_descriptor: Dictionary = {}
+var _archive_context: String = "play"
+var _archive_preferred_case_id: String = ""
+var _case_01_open_notice_pending: bool = false
 var _confirmation_overlay: Control
 var _confirmation_title: Label
 var _confirmation_body: Label
@@ -40,10 +50,20 @@ var _confirmation_previous_focus: Control
 
 func _ready() -> void:
 	_setup_window()
-	save_manager = SaveManager.new()
-	var save_result: Dictionary = save_manager.initialize()
-	if not bool(save_result.get("success", false)):
-		push_warning("AppRoot: save manager initialization failed: " + str(save_result.get("error", "")))
+	registry_loader = CaseDataLoader.new()
+
+	if not registry_loader.load_registry():
+		push_error("AppRoot: case registry could not be loaded.")
+	else:
+		registered_cases = registry_loader.get_registered_cases()
+		_build_case_save_managers()
+		case_progress_manager = CaseProgressManager.new(registered_cases)
+		var progress_result: Dictionary = case_progress_manager.initialize()
+
+		if not bool(progress_result.get("success", false)):
+			push_warning("AppRoot: case progress manager initialization failed.")
+
+		_migrate_legacy_case_completion()
 
 	settings_manager = SettingsManager.new()
 	var settings_result: Dictionary = settings_manager.initialize()
@@ -75,6 +95,11 @@ func _unhandled_input(event: InputEvent) -> void:
 	if load_ui != null and is_instance_valid(load_ui):
 		_return_from_title_load()
 		get_viewport().set_input_as_handled()
+		return
+
+	if archive_ui != null and is_instance_valid(archive_ui):
+		_return_from_archive()
+		get_viewport().set_input_as_handled()
 
 
 func _setup_window() -> void:
@@ -93,7 +118,7 @@ func _build_start_ui() -> void:
 		return
 	_fill_rect(start_ui)
 	add_child(start_ui)
-	start_ui.configure(save_manager)
+	start_ui.configure(_latest_valid_autosave_summary())
 	start_ui.new_game_requested.connect(_on_new_game_requested)
 	start_ui.continue_requested.connect(_on_continue_requested)
 	start_ui.load_requested.connect(_open_title_load)
@@ -105,45 +130,58 @@ func _show_start_ui() -> void:
 	_stop_audio()
 	_dispose_main_ui()
 	_dispose_load_ui()
+	_dispose_archive_ui()
 	_dispose_settings_ui()
 	_close_confirmation()
+	_current_case_descriptor.clear()
 	if start_ui != null:
 		start_ui.visible = true
+		start_ui.set_continue_summary(_latest_valid_autosave_summary())
 		start_ui.refresh_autosave_summary()
 		start_ui.call_deferred("focus_default")
 
 
 func _on_new_game_requested() -> void:
 	start_ui.clear_feedback()
-	if _has_any_save_file():
-		_show_confirmation(
-			"开始新游戏？",
-			"开始新游戏将覆盖自动存档。\n手动存档不会被删除。",
-			"开始新游戏",
-			Callable(self, "_begin_new_game")
-		)
-	else:
-		_begin_new_game()
+	_open_archive("play")
 
 
-func _begin_new_game() -> void:
+func _begin_new_game(descriptor: Dictionary) -> void:
 	_close_confirmation()
 	_stop_audio()
-	_enter_main_ui("new_game", {}, "new_game")
+	_enter_main_ui(descriptor, "new_game", {}, "new_game")
 
 
 func _on_continue_requested() -> void:
 	start_ui.clear_feedback()
-	var load_result: Dictionary = save_manager.load_autosave()
+	var latest: Dictionary = _latest_valid_autosave_summary()
+	var case_id: String = str(latest.get("case_id", ""))
+	var descriptor: Dictionary = registry_loader.get_case_descriptor(case_id)
+	var manager: SaveManager = _manager_for_case(case_id)
+
+	if descriptor.is_empty() or manager == null:
+		start_ui.show_feedback("暂无可用自动存档")
+		return
+
+	var load_result: Dictionary = manager.load_autosave()
 	if not bool(load_result.get("success", false)):
 		start_ui.show_feedback(_friendly_autosave_error(load_result))
-		start_ui.refresh_autosave_summary()
+		start_ui.set_continue_summary(_latest_valid_autosave_summary())
 		return
-	_enter_loaded_document(load_result, "continue")
+	_enter_loaded_document(load_result, "continue", descriptor)
 
 
 func _open_title_load() -> void:
+	_open_archive("load")
+
+
+func _open_case_load(descriptor: Dictionary) -> void:
 	if load_ui != null and is_instance_valid(load_ui):
+		return
+	var manager: SaveManager = _manager_for_case(str(descriptor.get("case_id", "")))
+
+	if manager == null:
+		_report_archive_failure("该案件的存档管理器不可用")
 		return
 	load_ui = LoadUIScene.instantiate() as CaseLoadUI
 	if load_ui == null:
@@ -152,47 +190,73 @@ func _open_title_load() -> void:
 		return
 	_fill_rect(load_ui)
 	add_child(load_ui)
-	load_ui.configure(save_manager)
+	load_ui.configure(manager, descriptor)
 	load_ui.return_requested.connect(_return_from_title_load)
 	load_ui.load_requested.connect(_on_title_load_requested)
-	start_ui.visible = false
+	_current_case_descriptor = descriptor.duplicate(true)
+	if archive_ui != null:
+		archive_ui.visible = false
 	load_ui.open_page()
 
 
 func _return_from_title_load() -> void:
 	_dispose_load_ui()
-	if start_ui != null:
-		start_ui.visible = true
-		start_ui.refresh_autosave_summary()
-		start_ui.call_deferred("focus_default")
+	if archive_ui != null and is_instance_valid(archive_ui):
+		archive_ui.visible = true
+		archive_ui.move_to_front()
+	else:
+		_show_start_ui()
 
 
 func _on_title_load_requested(slot_type: String, slot_index: int) -> void:
+	var manager: SaveManager = _manager_for_case(str(_current_case_descriptor.get("case_id", "")))
+
+	if manager == null:
+		load_ui.report_load_failure("案件存档管理器不可用")
+		return
 	var load_result: Dictionary = (
-		save_manager.load_autosave()
+		manager.load_autosave()
 		if slot_type == "autosave"
-		else save_manager.load_manual(slot_index)
+		else manager.load_manual(slot_index)
 	)
 	if not bool(load_result.get("success", false)):
 		load_ui.report_load_failure(str(load_result.get("error", "存档不可读取")))
 		return
-	_enter_loaded_document(load_result, "title_load")
+	_enter_loaded_document(load_result, "title_load", _current_case_descriptor)
 
 
-func _enter_loaded_document(load_result: Dictionary, source: String) -> void:
+func _enter_loaded_document(
+	load_result: Dictionary,
+	source: String,
+	descriptor: Dictionary
+) -> void:
 	var document_value: Variant = load_result.get("data", {})
 	if not (document_value is Dictionary):
 		_report_entry_failure(source, "存档根数据无效")
 		return
-	var runtime_value: Variant = (document_value as Dictionary).get("runtime_state", {})
+	var document: Dictionary = document_value
+
+	if (
+		str(document.get("case_id", "")) != str(descriptor.get("case_id", ""))
+		or str(document.get("slice_id", "")) != str(descriptor.get("slice_id", ""))
+	):
+		_report_entry_failure(source, "存档与所选案件不匹配")
+		return
+
+	var runtime_value: Variant = document.get("runtime_state", {})
 	if not (runtime_value is Dictionary):
 		_report_entry_failure(source, "存档运行状态无效")
 		return
 	_stop_audio()
-	_enter_main_ui("loaded", (runtime_value as Dictionary).duplicate(true), source)
+	_enter_main_ui(descriptor, "loaded", (runtime_value as Dictionary).duplicate(true), source)
 
 
-func _enter_main_ui(mode: String, runtime_data: Dictionary, source: String) -> void:
+func _enter_main_ui(
+	descriptor: Dictionary,
+	mode: String,
+	runtime_data: Dictionary,
+	source: String
+) -> void:
 	if main_ui != null and is_instance_valid(main_ui):
 		return
 	var candidate: Control = MainUIScene.instantiate() as Control
@@ -202,13 +266,16 @@ func _enter_main_ui(mode: String, runtime_data: Dictionary, source: String) -> v
 		return
 
 	_pending_entry_source = source
+	_current_case_descriptor = descriptor.duplicate(true)
 	main_ui = candidate
 	main_ui.visible = false
 	_fill_rect(main_ui)
-	main_ui.call("configure_startup", mode, runtime_data)
+	main_ui.call("configure_case", descriptor, mode, runtime_data)
 	main_ui.connect("initialization_succeeded", Callable(self, "_on_main_initialized"))
 	main_ui.connect("initialization_failed", Callable(self, "_on_main_initialization_failed"))
 	main_ui.connect("settings_requested", Callable(self, "_open_game_settings"))
+	main_ui.connect("archive_requested", Callable(self, "_on_archive_requested"))
+	main_ui.connect("case_completion_requested", Callable(self, "_on_case_completion_requested"))
 	add_child(main_ui)
 
 
@@ -218,6 +285,7 @@ func _on_main_initialized() -> void:
 	main_ui.visible = true
 	start_ui.visible = false
 	_dispose_load_ui()
+	_dispose_archive_ui()
 	_pending_entry_source = ""
 
 
@@ -235,9 +303,295 @@ func _report_entry_failure(source: String, message: String) -> void:
 	if source == "title_load" and load_ui != null and is_instance_valid(load_ui):
 		load_ui.report_load_failure(message)
 		return
+	if archive_ui != null and is_instance_valid(archive_ui):
+		archive_ui.visible = true
+		return
 	start_ui.visible = true
 	start_ui.show_feedback(message)
 	start_ui.refresh_autosave_summary()
+
+
+func _build_case_save_managers() -> void:
+	save_managers.clear()
+
+	for descriptor in registered_cases:
+		var case_id: String = str(descriptor.get("case_id", ""))
+		var slice_id: String = str(descriptor.get("slice_id", ""))
+		var manager := SaveManager.new(case_id, slice_id)
+		var result: Dictionary = manager.initialize()
+
+		if not bool(result.get("success", false)):
+			push_warning("AppRoot: save manager failed for %s: %s" % [
+				case_id,
+				str(result.get("error", ""))
+			])
+
+		save_managers[case_id] = manager
+
+
+func _manager_for_case(case_id: String) -> SaveManager:
+	var value: Variant = save_managers.get(case_id)
+	return value as SaveManager if value is SaveManager else null
+
+
+func _latest_valid_autosave_summary() -> Dictionary:
+	var latest: Dictionary = {}
+	var latest_time: int = -1
+
+	for descriptor in registered_cases:
+		var case_id: String = str(descriptor.get("case_id", ""))
+		var manager: SaveManager = _manager_for_case(case_id)
+
+		if manager == null:
+			continue
+
+		var summary: Dictionary = manager.read_slot_summary("autosave", 0)
+
+		if str(summary.get("status", "")) != "available":
+			continue
+
+		var saved_at: int = int(summary.get("saved_at_unix", 0))
+
+		if saved_at < latest_time:
+			continue
+
+		latest_time = saved_at
+		latest = summary.duplicate(true)
+		latest["case_id"] = case_id
+		latest["slice_id"] = str(descriptor.get("slice_id", ""))
+		latest["case_title"] = str(descriptor.get("title", ""))
+
+	return latest
+
+
+func _open_archive(context: String, preferred_case_id: String = "") -> void:
+	if archive_ui != null and is_instance_valid(archive_ui):
+		return
+
+	archive_ui = ArchiveUIScene.instantiate() as CaseArchiveUI
+
+	if archive_ui == null:
+		start_ui.show_feedback("档案库暂时不可用")
+		push_error("AppRoot: ArchiveUI could not be instantiated.")
+		return
+
+	_archive_context = "load" if context == "load" else "play"
+	_archive_preferred_case_id = preferred_case_id
+	_fill_rect(archive_ui)
+	archive_ui.configure(
+		registered_cases,
+		_build_archive_statuses(),
+		_archive_context,
+		_resolve_archive_preferred_case(preferred_case_id)
+	)
+	archive_ui.start_requested.connect(_on_archive_start_requested)
+	archive_ui.continue_requested.connect(_on_archive_continue_requested)
+	archive_ui.load_requested.connect(_open_case_load)
+	archive_ui.return_requested.connect(_return_from_archive)
+	add_child(archive_ui)
+	start_ui.visible = false
+	archive_ui.move_to_front()
+
+
+func _return_from_archive() -> void:
+	_dispose_load_ui()
+	_dispose_archive_ui()
+	if start_ui != null:
+		start_ui.visible = true
+		start_ui.set_continue_summary(_latest_valid_autosave_summary())
+		start_ui.call_deferred("focus_default")
+
+
+func _on_archive_start_requested(descriptor: Dictionary, restart: bool) -> void:
+	if restart:
+		_show_confirmation(
+			"重新开始这份档案？",
+			"将覆盖该案件的自动存档。手动存档不会被删除。",
+			"重新开始",
+			_begin_new_game.bind(descriptor.duplicate(true))
+		)
+	else:
+		_begin_new_game(descriptor)
+
+
+func _on_archive_continue_requested(descriptor: Dictionary) -> void:
+	var manager: SaveManager = _manager_for_case(str(descriptor.get("case_id", "")))
+
+	if manager == null:
+		_report_archive_failure("该案件的存档管理器不可用")
+		return
+
+	var result: Dictionary = manager.load_autosave()
+
+	if not bool(result.get("success", false)):
+		_report_archive_failure(_friendly_autosave_error(result))
+		return
+
+	_enter_loaded_document(result, "archive_continue", descriptor)
+
+
+func _on_archive_requested(preferred_case_id: String) -> void:
+	_stop_audio()
+	_dispose_settings_ui()
+	_dispose_main_ui()
+	_current_case_descriptor.clear()
+	_open_archive("play", preferred_case_id)
+	_case_01_open_notice_pending = false
+
+
+func _on_case_completion_requested(case_id: String) -> void:
+	if case_progress_manager == null:
+		push_warning("AppRoot: case completion was not persisted because progress manager is unavailable.")
+		return
+
+	var result: Dictionary = case_progress_manager.mark_case_completed(case_id)
+
+	if not bool(result.get("success", false)):
+		push_warning("AppRoot: failed to persist case completion: " + str(result.get("error", "")))
+		return
+
+	if case_id == "tutorial_00" and bool(result.get("changed", false)):
+		_case_01_open_notice_pending = true
+
+	_refresh_archive_statuses()
+
+
+func _build_archive_statuses() -> Dictionary:
+	var statuses: Dictionary = {}
+	var tutorial_completed: bool = false
+
+	for descriptor in registered_cases:
+		var case_id: String = str(descriptor.get("case_id", ""))
+		var manager: SaveManager = _manager_for_case(case_id)
+		var globally_completed: bool = (
+			case_progress_manager != null
+			and case_progress_manager.is_case_completed(case_id)
+		)
+		var status := {
+			"label": "未调查",
+			"has_any_save": false,
+			"has_valid_autosave": false,
+			"locked": false,
+			"completed": globally_completed,
+			"recommendation": ""
+		}
+
+		if manager != null:
+			var summaries: Array[Dictionary] = manager.get_all_slot_summaries()
+			var has_available: bool = false
+			var has_corrupted: bool = false
+			var has_incompatible: bool = false
+
+			for summary in summaries:
+				var slot_status: String = str(summary.get("status", "empty"))
+				status["has_any_save"] = bool(status["has_any_save"]) or slot_status != "empty"
+				has_available = has_available or slot_status == "available"
+				has_corrupted = has_corrupted or slot_status == "corrupted"
+				has_incompatible = has_incompatible or slot_status == "incompatible"
+
+			var autosave: Dictionary = manager.read_slot_summary("autosave", 0)
+			var autosave_status: String = str(autosave.get("status", "empty"))
+			status["has_valid_autosave"] = str(autosave.get("status", "")) == "available"
+
+			if bool(status["completed"]):
+				status["label"] = "已完成"
+			elif autosave_status == "corrupted":
+				status["label"] = "自动存档损坏"
+			elif autosave_status == "incompatible":
+				status["label"] = "版本不兼容"
+			elif has_available:
+				status["label"] = "调查中"
+			elif has_corrupted:
+				status["label"] = "自动存档损坏"
+			elif has_incompatible:
+				status["label"] = "版本不兼容"
+
+		if str(descriptor.get("case_type", "")) == "tutorial" and bool(status["completed"]):
+			tutorial_completed = true
+
+		statuses[case_id] = status
+
+	if not tutorial_completed and statuses.has("case_01"):
+		(statuses["case_01"] as Dictionary)["locked"] = true
+		(statuses["case_01"] as Dictionary)["label"] = "未开放"
+		(statuses["case_01"] as Dictionary)["recommendation"] = "完成 T-00 教学档案后开放"
+	elif tutorial_completed and _case_01_open_notice_pending and statuses.has("case_01"):
+		(statuses["case_01"] as Dictionary)["recommendation"] = "CASE 01 已开放：《隔音室谋杀案》"
+
+	return statuses
+
+
+func _refresh_archive_statuses() -> void:
+	if archive_ui != null and is_instance_valid(archive_ui):
+		archive_ui.refresh_statuses(_build_archive_statuses())
+
+
+func _migrate_legacy_case_completion() -> void:
+	if case_progress_manager == null:
+		return
+
+	for descriptor in registered_cases:
+		var case_id: String = str(descriptor.get("case_id", ""))
+		var completion_flag: String = str(descriptor.get("completion_flag", ""))
+
+		if completion_flag == "" or case_progress_manager.has_case_record(case_id):
+			continue
+
+		var manager: SaveManager = _manager_for_case(case_id)
+
+		if manager == null:
+			continue
+
+		for summary in manager.get_all_slot_summaries():
+			if str(summary.get("status", "")) != "available":
+				continue
+
+			var load_result: Dictionary = (
+				manager.load_autosave()
+				if str(summary.get("slot_type", "")) == "autosave"
+				else manager.load_manual(int(summary.get("slot_index", -1)))
+			)
+			var document_value: Variant = load_result.get("data", {})
+			var runtime_value: Variant = (
+				(document_value as Dictionary).get("runtime_state", {})
+				if document_value is Dictionary
+				else {}
+			)
+			var flags_value: Variant = (
+				(runtime_value as Dictionary).get("flags", {})
+				if runtime_value is Dictionary
+				else {}
+			)
+
+			if flags_value is Dictionary and bool((flags_value as Dictionary).get(completion_flag, false)):
+				var migration_result: Dictionary = case_progress_manager.mark_case_completed(
+					case_id,
+					int(summary.get("saved_at_unix", 0))
+				)
+
+				if not bool(migration_result.get("success", false)):
+					push_warning("AppRoot: failed to migrate completion for case: " + case_id)
+
+				break
+
+
+func _resolve_archive_preferred_case(requested: String) -> String:
+	if requested != "" and not registry_loader.get_case_descriptor(requested).is_empty():
+		return requested
+
+	var statuses: Dictionary = _build_archive_statuses()
+	var tutorial_status: Variant = statuses.get("tutorial_00", {})
+
+	if tutorial_status is Dictionary and bool((tutorial_status as Dictionary).get("completed", false)):
+		return "case_01"
+
+	return "tutorial_00" if not registry_loader.get_case_descriptor("tutorial_00").is_empty() else ""
+
+
+func _report_archive_failure(message: String) -> void:
+	push_warning("AppRoot: " + message)
+	if start_ui != null:
+		start_ui.show_feedback(message)
 
 
 func _open_title_settings() -> void:
@@ -313,13 +667,6 @@ func _confirm_quit() -> void:
 	get_tree().quit()
 
 
-func _has_any_save_file() -> bool:
-	for summary in save_manager.get_all_slot_summaries():
-		if str(summary.get("status", "empty")) != "empty":
-			return true
-	return false
-
-
 func _friendly_autosave_error(result: Dictionary) -> String:
 	var status: String = str(result.get("status", "corrupted"))
 	if status == "incompatible":
@@ -346,6 +693,13 @@ func _dispose_load_ui() -> void:
 		load_ui.close_page()
 		load_ui.queue_free()
 	load_ui = null
+
+
+func _dispose_archive_ui() -> void:
+	if archive_ui != null and is_instance_valid(archive_ui):
+		archive_ui.visible = false
+		archive_ui.queue_free()
+	archive_ui = null
 
 
 func _dispose_settings_ui() -> void:

@@ -2,23 +2,33 @@ extends RefCounted
 class_name SaveManager
 
 const FORMAT_VERSION := 1
-const CASE_ID := "case_01"
-const SLICE_ID := "control_backup"
 const DEFAULT_SAVE_DIR := "user://saves"
 const MANUAL_SLOT_COUNT := 20
 const SLOTS_PER_PAGE := 7
 const PAGE_COUNT := 3
 
 var save_directory: String = DEFAULT_SAVE_DIR
-var _validator := SaveDataValidator.new()
+var case_id: String = "case_01"
+var slice_id: String = "control_backup"
+var _validator: SaveDataValidator
 var _initialized: bool = false
 
 
-func _init(directory: String = DEFAULT_SAVE_DIR) -> void:
-	save_directory = directory.trim_suffix("/")
+func _init(
+	configured_case_id: String = "case_01",
+	configured_slice_id: String = "control_backup",
+	base_directory: String = DEFAULT_SAVE_DIR
+) -> void:
+	case_id = configured_case_id
+	slice_id = configured_slice_id
+	save_directory = base_directory.trim_suffix("/") + "/" + case_id
+	_validator = SaveDataValidator.new(case_id, slice_id)
 
 
 func initialize() -> Dictionary:
+	if not _is_safe_identifier(case_id) or not _is_safe_identifier(slice_id):
+		return _failure("案件存档标识无效")
+
 	var absolute_directory: String = ProjectSettings.globalize_path(save_directory)
 	var directory_error: Error = DirAccess.make_dir_recursive_absolute(absolute_directory)
 
@@ -30,6 +40,9 @@ func initialize() -> Dictionary:
 	for slot_index in range(0, MANUAL_SLOT_COUNT + 1):
 		var slot_type: String = "autosave" if slot_index == 0 else "manual"
 		_recover_interrupted_write(_slot_path(slot_type, slot_index))
+
+	if case_id == "case_01":
+		_migrate_legacy_root_saves()
 
 	_initialized = true
 	return _success()
@@ -127,8 +140,8 @@ func _save_slot(
 
 	var document: Dictionary = {
 		"format_version": FORMAT_VERSION,
-		"case_id": CASE_ID,
-		"slice_id": SLICE_ID,
+		"case_id": case_id,
+		"slice_id": slice_id,
 		"slot_type": slot_type,
 		"slot_index": slot_index,
 		"saved_at_unix": int(Time.get_unix_time_from_system()),
@@ -344,11 +357,56 @@ func _slot_path(slot_type: String, slot_index: int) -> String:
 	return save_directory + "/manual_%02d.json" % slot_index
 
 
+func _migrate_legacy_root_saves() -> void:
+	var legacy_directory: String = DEFAULT_SAVE_DIR
+
+	for slot_index in range(0, MANUAL_SLOT_COUNT + 1):
+		var slot_type: String = "autosave" if slot_index == 0 else "manual"
+		var legacy_path: String = (
+			legacy_directory + "/autosave.json"
+			if slot_type == "autosave"
+			else legacy_directory + "/manual_%02d.json" % slot_index
+		)
+		var destination_path: String = _slot_path(slot_type, slot_index)
+
+		if not FileAccess.file_exists(legacy_path) or FileAccess.file_exists(destination_path):
+			continue
+
+		var validation: Dictionary = _read_and_validate(legacy_path, slot_type, slot_index)
+
+		if not bool(validation.get("success", false)):
+			push_warning("SaveManager: legacy save retained because it is not valid CASE 01 data: " + legacy_path)
+			continue
+
+		var copy_error: Error = DirAccess.copy_absolute(
+			ProjectSettings.globalize_path(legacy_path),
+			ProjectSettings.globalize_path(destination_path)
+		)
+
+		if copy_error != OK:
+			push_warning("SaveManager: failed to copy legacy save: " + legacy_path)
+			continue
+
+		var copied: Dictionary = _read_and_validate(destination_path, slot_type, slot_index)
+
+		if not bool(copied.get("success", false)):
+			_remove_file_if_present(destination_path)
+			push_warning("SaveManager: legacy save copy failed validation: " + legacy_path)
+			continue
+
+		push_warning("SaveManager: copied legacy CASE 01 save into the case directory: " + legacy_path)
+
+
 func _is_valid_slot(slot_type: String, slot_index: int) -> bool:
 	return (
 		(slot_type == "autosave" and slot_index == 0)
 		or (slot_type == "manual" and slot_index >= 1 and slot_index <= MANUAL_SLOT_COUNT)
 	)
+
+
+func _is_safe_identifier(value: String) -> bool:
+	var regex := RegEx.new()
+	return regex.compile("^[a-z0-9_]+$") == OK and regex.search(value) != null
 
 
 func _ensure_initialized() -> Dictionary:

@@ -17,6 +17,8 @@ var _keyword_counts_by_source: Dictionary = {}
 var _keyword_connections_by_key: Dictionary = {}
 var _keyword_connection_count: int = 0
 var _audio_marker_counts_by_clue: Dictionary = {}
+var _issued_keyword_ids: Dictionary = {}
+var _keyword_id_nonce: int = 0
 
 
 func set_current_node(node_id: String, autosave: bool) -> void:
@@ -55,8 +57,20 @@ func add_keyword(text: String, source_node_id: String) -> Dictionary:
 	var source_count: int = int(_keyword_counts_by_source.get(source_node_id, 0)) + 1
 	_keyword_counts_by_source[source_node_id] = source_count
 
+	var wall_clock_nonce: int = int(Time.get_unix_time_from_system() * 1000000.0)
+	_keyword_id_nonce = maxi(_keyword_id_nonce + 1, wall_clock_nonce)
+	var instance_id: String = "keyword_%s_%03d_%d" % [
+		source_node_id,
+		source_count,
+		_keyword_id_nonce
+	]
+
+	while _issued_keyword_ids.has(instance_id):
+		_keyword_id_nonce += 1
+		instance_id = "keyword_%s_%03d_%d" % [source_node_id, source_count, _keyword_id_nonce]
+
 	var instance: Dictionary = {
-		"instance_id": "keyword_%s_%03d" % [source_node_id, source_count],
+		"instance_id": instance_id,
 		"text": normalized_text,
 		"normalized_text": normalized_text,
 		"source_node_id": source_node_id
@@ -64,6 +78,7 @@ func add_keyword(text: String, source_node_id: String) -> Dictionary:
 
 	keyword_instances.append(instance)
 	_keyword_instances_by_key[keyword_key] = instance
+	_issued_keyword_ids[instance_id] = true
 	return {
 		"added": true,
 		"reason": "added",
@@ -106,6 +121,74 @@ func get_keyword_instance(instance_id: String) -> Dictionary:
 		return {}
 
 	return instance.duplicate(true)
+
+
+func get_keyword_instances_by_normalized_text(text: String) -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	var normalized_text: String = normalize_keyword_text(text)
+
+	if normalized_text == "":
+		return result
+
+	for instance in keyword_instances:
+		if str(instance.get("normalized_text", "")) == normalized_text:
+			result.append(instance.duplicate(true))
+
+	return result
+
+
+func is_keyword_instance_connected(instance_id: String) -> bool:
+	if instance_id == "":
+		return false
+	var instance: Dictionary = _find_keyword_instance_ref(instance_id)
+
+	if instance.is_empty():
+		return false
+
+	for connection in keyword_connections:
+		if _connection_references_instance(connection, instance):
+			return true
+
+	return false
+
+
+func can_remove_keyword(instance_id: String) -> Dictionary:
+	if instance_id.strip_edges() == "":
+		return {"allowed": false, "reason": "invalid_id"}
+
+	if _find_keyword_instance_ref(instance_id).is_empty():
+		return {"allowed": false, "reason": "not_found"}
+
+	if is_keyword_instance_connected(instance_id):
+		return {"allowed": false, "reason": "connected"}
+
+	return {"allowed": true, "reason": "success"}
+
+
+func remove_keyword(instance_id: String) -> Dictionary:
+	var check: Dictionary = can_remove_keyword(instance_id)
+
+	if not bool(check.get("allowed", false)):
+		return {
+			"success": false,
+			"reason": str(check.get("reason", "not_found"))
+		}
+
+	for index in range(keyword_instances.size()):
+		var instance: Dictionary = keyword_instances[index]
+
+		if str(instance.get("instance_id", "")) != instance_id:
+			continue
+
+		var key: String = _keyword_key(
+			str(instance.get("normalized_text", "")),
+			str(instance.get("source_node_id", ""))
+		)
+		keyword_instances.remove_at(index)
+		_keyword_instances_by_key.erase(key)
+		return {"success": true, "reason": "success"}
+
+	return {"success": false, "reason": "not_found"}
 
 
 func get_discovered_keyword_texts() -> PackedStringArray:
@@ -211,9 +294,13 @@ func get_keyword_connections() -> Array[Dictionary]:
 
 func get_keyword_connections_for_keyword(keyword_instance_id: String) -> Array[Dictionary]:
 	var result: Array[Dictionary] = []
+	var instance: Dictionary = _find_keyword_instance_ref(keyword_instance_id)
+
+	if instance.is_empty():
+		return result
 
 	for connection in keyword_connections:
-		if str(connection.get("keyword_instance_id", "")) == keyword_instance_id:
+		if _connection_references_instance(connection, instance):
 			result.append(connection.duplicate(true))
 
 	return result
@@ -384,6 +471,7 @@ func validate_save_dictionary(data: Dictionary, emit_warning: bool = true) -> bo
 
 	var keyword_ids: Dictionary = {}
 	var keyword_keys: Dictionary = {}
+	var keyword_ids_by_key: Dictionary = {}
 
 	for raw_instance in raw_instances:
 		if not (raw_instance is Dictionary):
@@ -405,6 +493,7 @@ func validate_save_dictionary(data: Dictionary, emit_warning: bool = true) -> bo
 
 		keyword_ids[instance_id] = true
 		keyword_keys[keyword_key] = true
+		keyword_ids_by_key[keyword_key] = instance_id
 
 	var raw_connections: Variant = data.get("keyword_connections")
 
@@ -423,11 +512,19 @@ func validate_save_dictionary(data: Dictionary, emit_warning: bool = true) -> bo
 		var keyword_instance_id: String = str(connection.get("keyword_instance_id", ""))
 		var target_node_id: String = str(connection.get("target_node_id", ""))
 		var outcome: String = str(connection.get("outcome", "")).to_lower()
+		var legacy_source_node_id: String = str(connection.get("source_node_id", ""))
+		var legacy_normalized_text: String = _connection_normalized_keyword(connection)
 
-		if connection_id == "" or keyword_instance_id == "" or target_node_id == "":
+		if connection_id == "" or target_node_id == "":
 			return _save_validation_failure("keyword connection is missing required String fields", emit_warning)
 
-		if outcome != "correct" or not keyword_ids.has(keyword_instance_id):
+		if keyword_instance_id == "":
+			keyword_instance_id = str(keyword_ids_by_key.get(
+				_keyword_key(legacy_normalized_text, legacy_source_node_id),
+				""
+			))
+
+		if outcome != "correct" or keyword_instance_id == "" or not keyword_ids.has(keyword_instance_id):
 			return _save_validation_failure("keyword connection outcome or instance reference is invalid", emit_warning)
 
 		var connection_key: String = _keyword_connection_key(keyword_instance_id, target_node_id)
@@ -489,9 +586,25 @@ func apply_save_dictionary(data: Dictionary) -> bool:
 
 	var new_keyword_connections: Array[Dictionary] = []
 	var raw_connections: Array = data.get("keyword_connections", [])
+	var instance_ids_by_key: Dictionary = {}
+
+	for instance in new_keyword_instances:
+		instance_ids_by_key[_keyword_key(
+			str(instance.get("normalized_text", "")),
+			str(instance.get("source_node_id", ""))
+		)] = str(instance.get("instance_id", ""))
 
 	for raw_connection in raw_connections:
-		new_keyword_connections.append((raw_connection as Dictionary).duplicate(true))
+		var connection: Dictionary = (raw_connection as Dictionary).duplicate(true)
+
+		if str(connection.get("keyword_instance_id", "")) == "":
+			var legacy_key: String = _keyword_key(
+				_connection_normalized_keyword(connection),
+				str(connection.get("source_node_id", ""))
+			)
+			connection["keyword_instance_id"] = str(instance_ids_by_key.get(legacy_key, ""))
+
+		new_keyword_connections.append(connection)
 
 	var new_audio_markers: Array[Dictionary] = []
 	var raw_markers: Array = data.get("audio_markers", [])
@@ -520,6 +633,7 @@ func reset_runtime_state() -> void:
 	keyword_connections.clear()
 	keyword_unlocked_nodes.clear()
 	audio_markers.clear()
+	_issued_keyword_ids.clear()
 	_rebuild_runtime_indexes()
 
 
@@ -535,13 +649,26 @@ func _rebuild_runtime_indexes() -> void:
 		var normalized_text: String = str(instance.get("normalized_text", ""))
 		var instance_id: String = str(instance.get("instance_id", ""))
 		_keyword_instances_by_key[_keyword_key(normalized_text, source_node_id)] = instance
+		_issued_keyword_ids[instance_id] = true
+		_keyword_id_nonce = maxi(_keyword_id_nonce, _id_sequence(instance_id))
 		_keyword_counts_by_source[source_node_id] = maxi(
 			int(_keyword_counts_by_source.get(source_node_id, 0)),
-			maxi(1, _id_sequence(instance_id))
+			maxi(1, _keyword_instance_sequence(instance_id))
 		)
 
 	for connection in keyword_connections:
 		var keyword_instance_id: String = str(connection.get("keyword_instance_id", ""))
+
+		if keyword_instance_id == "":
+			keyword_instance_id = str((_keyword_instances_by_key.get(
+				_keyword_key(
+					_connection_normalized_keyword(connection),
+					str(connection.get("source_node_id", ""))
+				),
+				{}
+			) as Dictionary).get("instance_id", ""))
+			connection["keyword_instance_id"] = keyword_instance_id
+
 		var target_node_id: String = str(connection.get("target_node_id", ""))
 		var connection_id: String = str(connection.get("connection_id", ""))
 		_keyword_connections_by_key[
@@ -588,6 +715,19 @@ func _id_sequence(id_value: String) -> int:
 	return int(last_part) if last_part.is_valid_int() else 0
 
 
+func _keyword_instance_sequence(instance_id: String) -> int:
+	var parts: PackedStringArray = instance_id.split("_", false)
+
+	if parts.size() >= 2:
+		var last_part: String = parts[parts.size() - 1]
+		var previous_part: String = parts[parts.size() - 2]
+
+		if last_part.is_valid_int() and previous_part.is_valid_int() and last_part.length() > 3:
+			return int(previous_part)
+
+	return _id_sequence(instance_id)
+
+
 func _keyword_key(normalized_text: String, source_node_id: String) -> String:
 	return source_node_id + "\u001f" + normalized_text
 
@@ -619,3 +759,23 @@ func _find_keyword_instance_ref(instance_id: String) -> Dictionary:
 			return instance
 
 	return {}
+
+
+func _connection_references_instance(connection: Dictionary, instance: Dictionary) -> bool:
+	var connection_instance_id: String = str(connection.get("keyword_instance_id", ""))
+
+	if connection_instance_id != "":
+		return connection_instance_id == str(instance.get("instance_id", ""))
+
+	return (
+		str(connection.get("source_node_id", "")) == str(instance.get("source_node_id", ""))
+		and _connection_normalized_keyword(connection) == str(instance.get("normalized_text", ""))
+	)
+
+
+func _connection_normalized_keyword(connection: Dictionary) -> String:
+	var text: String = str(connection.get(
+		"normalized_keyword",
+		connection.get("normalized_text", connection.get("keyword_text", ""))
+	))
+	return normalize_keyword_text(text)

@@ -14,6 +14,7 @@ var current_audio_id: String = ""
 
 var _player: AudioStreamPlayer
 var _is_paused: bool = false
+var _pending_seek_position: float = 0.0
 var _last_progress_second: int = -1
 var _streams_by_id: Dictionary = {}
 var _durations_by_id: Dictionary = {}
@@ -112,6 +113,7 @@ func prepare_audio(audio_id: String) -> bool:
 	_player.stream_paused = false
 	current_audio_id = audio_id
 	_is_paused = false
+	_pending_seek_position = 0.0
 	_last_progress_second = -1
 	return true
 
@@ -134,9 +136,11 @@ func play_audio(audio_id: String = "") -> bool:
 	_player.stream_paused = false
 	_is_paused = false
 	_last_progress_second = -1
-	_player.play()
+	var start_position: float = _pending_seek_position
+	_pending_seek_position = 0.0
+	_player.play(start_position)
 	audio_started.emit(current_audio_id)
-	audio_progress_changed.emit(current_audio_id, 0.0, get_loaded_duration())
+	audio_progress_changed.emit(current_audio_id, start_position, get_loaded_duration())
 	return true
 
 
@@ -166,6 +170,7 @@ func stop_audio() -> void:
 	_player.stop()
 	_player.stream_paused = false
 	_is_paused = false
+	_pending_seek_position = 0.0
 	_last_progress_second = -1
 	audio_stopped.emit(stopped_audio_id)
 	audio_progress_changed.emit(stopped_audio_id, 0.0, get_loaded_duration())
@@ -181,7 +186,14 @@ func seek_audio(time: float) -> void:
 	if duration > 0.0:
 		target_time = minf(target_time, duration)
 
-	_player.seek(target_time)
+	if _player.playing or _is_paused:
+		_player.seek(target_time)
+	else:
+		# Godot 4.7 can crash in the native audio backend when seek() is
+		# called before playback has started. Preserve stopped-state seeking
+		# without auto-playing; play_audio() consumes this position later.
+		_pending_seek_position = target_time
+
 	audio_progress_changed.emit(current_audio_id, target_time, duration)
 
 
@@ -204,6 +216,9 @@ func is_paused() -> bool:
 func get_playback_position() -> float:
 	if current_audio_id == "" or _player == null or _player.stream == null:
 		return 0.0
+
+	if not _player.playing and not _is_paused:
+		return _pending_seek_position
 
 	return _sanitize_time(_player.get_playback_position())
 
@@ -324,6 +339,7 @@ func _on_player_finished() -> void:
 	var finished_audio_id: String = current_audio_id
 	_player.stream_paused = false
 	_is_paused = false
+	_pending_seek_position = 0.0
 	_last_progress_second = -1
 	audio_finished.emit(finished_audio_id)
 	audio_progress_changed.emit(finished_audio_id, 0.0, get_loaded_duration())

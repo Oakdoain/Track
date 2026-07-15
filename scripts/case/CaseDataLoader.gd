@@ -4,12 +4,190 @@ class_name CaseDataLoader
 const DEFAULT_NODES_PATH := "res://data/cases/case_01/control_backup/nodes.json"
 const DEFAULT_GRAPH_LAYOUT_PATH := "res://data/cases/case_01/control_backup/graph_layout.json"
 const DEFAULT_KEYWORD_RULES_PATH := "res://data/cases/case_01/control_backup/keyword_rules.json"
+const REGISTRY_PATH := "res://data/cases/cases.json"
+const CASE_DATA_ROOT := "res://data/cases/"
 
 var data: Dictionary = {}
 var nodes_by_id: Dictionary = {}
 var graph_layout: Dictionary = {}
 var keyword_rules: Array[Dictionary] = []
 var keyword_presets: Dictionary = {}
+var registered_cases: Array[Dictionary] = []
+var current_case_descriptor: Dictionary = {}
+var case_metadata: Dictionary = {}
+var clues_data: Dictionary = {}
+var audio_clues_data: Dictionary = {}
+
+
+func load_registry(path: String = REGISTRY_PATH) -> bool:
+	var parsed: Dictionary = _read_json_dictionary(path, "case registry")
+
+	if parsed.is_empty():
+		registered_cases.clear()
+		return false
+
+	var raw_cases: Variant = parsed.get("cases", [])
+
+	if not (raw_cases is Array):
+		push_warning("CaseDataLoader: registry cases must be an Array.")
+		registered_cases.clear()
+		return false
+
+	var validated: Array[Dictionary] = []
+	var seen_case_ids: Dictionary = {}
+
+	for raw_case in raw_cases:
+		if not (raw_case is Dictionary):
+			push_warning("CaseDataLoader: ignored non-Dictionary registry entry.")
+			continue
+
+		var descriptor: Dictionary = raw_case
+
+		if not _is_valid_case_descriptor(descriptor):
+			push_warning("CaseDataLoader: ignored invalid registry entry.")
+			continue
+
+		var case_id: String = str(descriptor.get("case_id", ""))
+
+		if seen_case_ids.has(case_id):
+			push_warning("CaseDataLoader: ignored duplicate case_id: " + case_id)
+			continue
+
+		seen_case_ids[case_id] = true
+		validated.append(descriptor.duplicate(true))
+
+	validated.sort_custom(_sort_case_descriptors)
+	registered_cases = validated
+	return not registered_cases.is_empty()
+
+
+func get_registered_cases() -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+
+	for descriptor in registered_cases:
+		result.append(descriptor.duplicate(true))
+
+	return result
+
+
+func get_case_descriptor(case_id: String) -> Dictionary:
+	for descriptor in registered_cases:
+		if str(descriptor.get("case_id", "")) == case_id:
+			return descriptor.duplicate(true)
+
+	return {}
+
+
+func load_case(case_id: String, slice_id: String) -> bool:
+	if registered_cases.is_empty() and not load_registry():
+		_clear_loaded_case()
+		return false
+
+	var descriptor: Dictionary = get_case_descriptor(case_id)
+
+	if descriptor.is_empty() or str(descriptor.get("slice_id", "")) != slice_id:
+		push_warning("CaseDataLoader: requested case is not registered: %s / %s" % [case_id, slice_id])
+		_clear_loaded_case()
+		return false
+
+	var data_path: String = str(descriptor.get("data_path", ""))
+	var metadata_candidate: Dictionary = _read_json_dictionary(data_path + "/case.json", "case metadata")
+
+	if (
+		metadata_candidate.is_empty()
+		or str(metadata_candidate.get("case_id", "")) != case_id
+		or str(metadata_candidate.get("slice_id", "")) != slice_id
+		or not (metadata_candidate.get("start_node_id", "") is String)
+		or str(metadata_candidate.get("start_node_id", "")) == ""
+	):
+		push_warning("CaseDataLoader: case.json does not match its registry descriptor.")
+		_clear_loaded_case()
+		return false
+
+	var candidate := CaseDataLoader.new()
+
+	if not candidate.load_nodes(data_path + "/nodes.json"):
+		_clear_loaded_case()
+		return false
+
+	if not candidate.load_graph_layout(data_path + "/graph_layout.json"):
+		_clear_loaded_case()
+		return false
+
+	if not candidate.load_keyword_rules(data_path + "/keyword_rules.json"):
+		_clear_loaded_case()
+		return false
+
+	var clues_candidate: Dictionary = _read_json_dictionary(data_path + "/clues.json", "clues")
+	var audio_candidate: Dictionary = _read_json_dictionary(data_path + "/audio_clues.json", "audio clues")
+
+	if clues_candidate.is_empty() or audio_candidate.is_empty():
+		_clear_loaded_case()
+		return false
+
+	var start_node_id: String = str(metadata_candidate.get("start_node_id", ""))
+
+	if candidate.get_node(start_node_id).is_empty():
+		push_warning("CaseDataLoader: case start node is missing: " + start_node_id)
+		_clear_loaded_case()
+		return false
+
+	# Commit only after every required file has parsed and cross-validation passed.
+	data = candidate.data.duplicate(true)
+	nodes_by_id = candidate.nodes_by_id.duplicate(true)
+	graph_layout = candidate.graph_layout.duplicate(true)
+	keyword_rules = candidate.keyword_rules.duplicate(true)
+	keyword_presets = candidate.keyword_presets.duplicate(true)
+	case_metadata = metadata_candidate.duplicate(true)
+	current_case_descriptor = descriptor.duplicate(true)
+	clues_data = clues_candidate.duplicate(true)
+	audio_clues_data = audio_candidate.duplicate(true)
+	return true
+
+
+func get_current_case_id() -> String:
+	return str(current_case_descriptor.get("case_id", case_metadata.get("case_id", "")))
+
+
+func get_current_slice_id() -> String:
+	return str(current_case_descriptor.get("slice_id", case_metadata.get("slice_id", "")))
+
+
+func get_case_metadata() -> Dictionary:
+	return case_metadata.duplicate(true)
+
+
+func get_nodes() -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	var raw_nodes: Variant = data.get("nodes", [])
+
+	if raw_nodes is Array:
+		for raw_node in raw_nodes:
+			if raw_node is Dictionary:
+				result.append((raw_node as Dictionary).duplicate(true))
+
+	return result
+
+
+func get_keyword_rules() -> Array[Dictionary]:
+	return keyword_rules.duplicate(true)
+
+
+func get_graph_layout() -> Dictionary:
+	return graph_layout.duplicate(true)
+
+
+func get_clues() -> Dictionary:
+	return clues_data.duplicate(true)
+
+
+func get_audio_clues() -> Dictionary:
+	return audio_clues_data.duplicate(true)
+
+
+func get_audio_data_path() -> String:
+	var data_path: String = str(current_case_descriptor.get("data_path", ""))
+	return data_path + "/audio_clues.json" if data_path != "" else ""
 
 
 func load_nodes(path: String = DEFAULT_NODES_PATH) -> bool:
@@ -70,11 +248,11 @@ func get_node(node_id: String) -> Dictionary:
 
 
 func get_initial_node_id() -> String:
-	return str(data.get("initial_node_id", ""))
+	return str(case_metadata.get("start_node_id", data.get("initial_node_id", "")))
 
 
 func get_chapter_title() -> String:
-	return str(data.get("chapter_title", ""))
+	return str(case_metadata.get("chapter_title", data.get("chapter_title", "")))
 
 
 func get_chapter_intro() -> String:
@@ -254,7 +432,7 @@ func _append_normalized_keyword_rule(base_rule: Dictionary, connection: Dictiona
 	var keyword: String = str(base_rule.get("keyword", connection.get("keyword", "")))
 	var normalized_keyword: String = _normalize_keyword(keyword)
 	var target_node_id: String = str(connection.get("target_node_id", ""))
-	var outcome: String = str(connection.get("outcome", "")).to_lower()
+	var outcome: String = str(connection.get("outcome", connection.get("result", ""))).to_lower()
 
 	if normalized_keyword == "" or target_node_id == "" or outcome == "":
 		push_warning("CaseDataLoader: skipped incomplete keyword connection rule for: " + keyword)
@@ -287,6 +465,47 @@ func _append_normalized_keyword_rule(base_rule: Dictionary, connection: Dictiona
 		push_warning("CaseDataLoader: keyword rule has no source node and is not global: " + keyword)
 		return
 
+	var unlock_node_ids: Array[String] = []
+	var raw_unlock_node_ids: Variant = connection.get("unlock_node_ids", [])
+
+	if raw_unlock_node_ids is Array:
+		for raw_unlock_node_id in raw_unlock_node_ids:
+			if raw_unlock_node_id is String and str(raw_unlock_node_id) != "":
+				var unlock_node_id: String = str(raw_unlock_node_id)
+
+				if not unlock_node_ids.has(unlock_node_id):
+					unlock_node_ids.append(unlock_node_id)
+			else:
+				push_warning("CaseDataLoader: ignored invalid unlock_node_ids entry for: " + keyword)
+	else:
+		push_warning("CaseDataLoader: unlock_node_ids must be an Array for: " + keyword)
+
+	var set_flags: Dictionary = {}
+	var raw_set_flags: Variant = connection.get("set_flags", {})
+
+	if raw_set_flags is Dictionary:
+		for raw_flag_name in (raw_set_flags as Dictionary).keys():
+			var flag_name: String = str(raw_flag_name)
+			var flag_value: Variant = (raw_set_flags as Dictionary).get(raw_flag_name)
+
+			if flag_name != "" and flag_value is bool:
+				set_flags[flag_name] = bool(flag_value)
+			else:
+				push_warning("CaseDataLoader: ignored invalid connection flag for: " + keyword)
+
+	var requires_flags: Dictionary = {}
+	var raw_requires_flags: Variant = connection.get("requires_flags", {})
+
+	if raw_requires_flags is Dictionary:
+		for raw_flag_name in (raw_requires_flags as Dictionary).keys():
+			var flag_name: String = str(raw_flag_name)
+			var flag_value: Variant = (raw_requires_flags as Dictionary).get(raw_flag_name)
+
+			if flag_name != "" and flag_value is bool:
+				requires_flags[flag_name] = bool(flag_value)
+			else:
+				push_warning("CaseDataLoader: ignored invalid required flag for: " + keyword)
+
 	for source_node_id in source_node_ids:
 		keyword_rules.append({
 			"keyword": keyword,
@@ -295,8 +514,12 @@ func _append_normalized_keyword_rule(base_rule: Dictionary, connection: Dictiona
 			"target_node_id": target_node_id,
 			"outcome": outcome,
 			"unlock_node_id": str(connection.get("unlock_node_id", "")),
+			"unlock_node_ids": unlock_node_ids.duplicate(),
 			"error_node_id": str(connection.get("error_node_id", "")),
 			"feedback": str(connection.get("feedback", "")),
+			"set_flags": set_flags.duplicate(true),
+			"requires_flags": requires_flags.duplicate(true),
+			"autosave_on_success": bool(connection.get("autosave_on_success", false)),
 			"allow_global": allow_global
 		})
 
@@ -416,3 +639,81 @@ func _normalize_keyword(text: String) -> String:
 		return normalized_text
 
 	return whitespace_regex.sub(normalized_text, " ", true)
+
+
+func _read_json_dictionary(path: String, label: String) -> Dictionary:
+	if not FileAccess.file_exists(path):
+		push_warning("CaseDataLoader: %s file not found: %s" % [label, path])
+		return {}
+
+	var json := JSON.new()
+	var error: Error = json.parse(FileAccess.get_file_as_string(path))
+
+	if error != OK:
+		push_warning("CaseDataLoader: %s JSON error: %s, line %d" % [
+			label,
+			json.get_error_message(),
+			json.get_error_line()
+		])
+		return {}
+
+	if not (json.data is Dictionary):
+		push_warning("CaseDataLoader: %s root must be a Dictionary." % label)
+		return {}
+
+	return (json.data as Dictionary).duplicate(true)
+
+
+func _is_valid_case_descriptor(descriptor: Dictionary) -> bool:
+	var string_fields: PackedStringArray = [
+		"case_id", "slice_id", "code", "title", "short_title", "subtitle",
+		"case_type", "estimated_time", "data_path", "completion_flag"
+	]
+
+	for field in string_fields:
+		if not (descriptor.get(field, null) is String):
+			return false
+
+	if not (descriptor.get("recommended", null) is bool):
+		return false
+
+	var order_value: Variant = descriptor.get("order", null)
+
+	if not (order_value is int or (order_value is float and float(order_value) == floorf(float(order_value)))):
+		return false
+
+	var case_id: String = str(descriptor.get("case_id", ""))
+	var slice_id: String = str(descriptor.get("slice_id", ""))
+	var data_path: String = str(descriptor.get("data_path", ""))
+
+	if case_id == "" or slice_id == "" or not _is_safe_identifier(case_id) or not _is_safe_identifier(slice_id):
+		return false
+
+	return (
+		data_path.begins_with(CASE_DATA_ROOT)
+		and not data_path.contains("..")
+		and not data_path.contains("\\")
+		and data_path == "%s%s/%s" % [CASE_DATA_ROOT, case_id, slice_id]
+		and FileAccess.file_exists(data_path + "/case.json")
+	)
+
+
+func _is_safe_identifier(value: String) -> bool:
+	var regex := RegEx.new()
+	return regex.compile("^[a-z0-9_]+$") == OK and regex.search(value) != null
+
+
+func _sort_case_descriptors(left: Dictionary, right: Dictionary) -> bool:
+	return int(left.get("order", 0)) < int(right.get("order", 0))
+
+
+func _clear_loaded_case() -> void:
+	data.clear()
+	nodes_by_id.clear()
+	graph_layout.clear()
+	keyword_rules.clear()
+	keyword_presets.clear()
+	current_case_descriptor.clear()
+	case_metadata.clear()
+	clues_data.clear()
+	audio_clues_data.clear()
