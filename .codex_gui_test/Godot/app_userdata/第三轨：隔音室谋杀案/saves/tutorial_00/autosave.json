@@ -1,0 +1,25 @@
+{
+	"format_version": 1,
+	"case_id": "tutorial_00",
+	"slice_id": "archive_training",
+	"slot_type": "autosave",
+	"slot_index": 0,
+	"saved_at_unix": 1784123399,
+	"metadata": {
+		"chapter_title": "调查流程训练",
+		"node_title": "开始之前",
+		"node_id": "tutorial_0000"
+	},
+	"runtime_state": {
+		"current_node_id": "tutorial_0000",
+		"unlocked_nodes": {
+			"tutorial_0000": true
+		},
+		"flags": {},
+		"last_safe_autosave_node_id": "tutorial_0000",
+		"keyword_instances": [],
+		"keyword_connections": [],
+		"keyword_unlocked_nodes": {},
+		"audio_markers": []
+	}
+}
