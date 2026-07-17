@@ -42,31 +42,21 @@
 			"location": "档案库 / 训练档案",
 			"time_label": "T-00",
 			"characters": ["你"],
-			"current_goal": "选择一个位置开始调查。",
+			"current_goal": "开始检查训练档案。",
 			"body": [
 				"你正在查看一份编号为T-00的训练档案。",
 				"在本游戏中，你作为一名侦探，将阅读案件记录、做出调查选择、从正文中发现关键词，并利用图谱判断不同信息之间的关系。",
-				"你的选择可能会帮助你走出迷茫，也可能会让推理偏离事实。",
-				"面前的档案袋尚未拆封，你准备从哪里开始？"
+				"你的选择会改变调查过程，也可能改变最终能够确认的结论。",
+				"面前的档案袋尚未拆封。检查顺序不会阻止你完成训练，但有些原始状态一旦改变就无法恢复。"
 			],
 			"audio_clues": [],
 			"text_clues": [],
 			"room_refs": [],
 			"choices": [
 				{
-					"title": "先查看档案封面",
-					"desc": "先确认档案的编号与用途，也许封面本身就藏着线索。",
-					"to": "tutorial_0002a"
-				},
-				{
-					"title": "直接翻到事件记录",
-					"desc": "跳过外围信息，直接查看这份训练档案记录的事件。",
-					"to": "tutorial_0002b"
-				},
-				{
-					"title": "检查档案袋的封口",
-					"desc": "观察胶面与封口痕迹，判断档案袋是否曾被打开。",
-					"to": "tutorial_0002c"
+					"title": "开始调查",
+					"desc": "进入调查枢纽，自行决定检查顺序。",
+					"to": "tutorial_0003"
 				}
 			],
 			"autosave": true
@@ -75,24 +65,24 @@
 			"node_id": "tutorial_0002a",
 			"title": "档案封面",
 			"icon_key": "document",
-			"node_type": "教学节点",
+			"node_type": "调查节点",
 			"location": "档案库 / 训练档案",
 			"time_label": "T-00",
 			"characters": ["你"],
-			"current_goal": "继续查看训练档案。",
+			"current_goal": "返回调查枢纽。",
+			"set_flags": {"tutorial_cover_checked": true},
 			"body": [
 				"封面上没有案件名称，只印着一行规整的编号：",
 				"T-00 / 调查流程训练档案",
 				"编号下方还有一行较小的文字：",
 				"档案中的每一项记录，都可能成为推断的一部分。",
-				"除此之外，封面上没有留下日期、署名或经手人的信息。",
-				"你翻开了档案。"
+				"除此之外，封面上没有留下日期、署名或经手人的信息。"
 			],
 			"audio_clues": [], "text_clues": [], "room_refs": [],
 			"choices": [
 				{
-					"title": "继续查看训练档案",
-					"desc": "进入档案正文，了解这份训练记录的基本内容。",
+					"title": "返回调查枢纽",
+					"desc": "继续选择要检查的位置。",
 					"to": "tutorial_0003"
 				}
 			],
@@ -100,26 +90,24 @@
 		},
 		{
 			"node_id": "tutorial_0002b",
-			"title": "事件记录",
+			"title": "拆开档案袋",
 			"icon_key": "document",
-			"node_type": "教学节点",
+			"node_type": "调查节点",
 			"location": "档案库 / 训练档案",
 			"time_label": "T-00",
 			"characters": ["你"],
-			"current_goal": "继续查看训练档案。",
+			"current_goal": "返回调查枢纽。",
+			"set_flags": {"tutorial_bag_opened": true},
 			"body": [
-				"你拆封了档案，翻到了第一页。",
-				"纸上记录的并不是一起正式案件，而是一段经过简化的训练事件。",
-				"部分信息被刻意保留，部分信息则可能没有实际价值。",
-				"页脚印着一行说明：",
-				"调查不是找到最多的信息，而是判断哪些信息能够支持结论。",
-				"看来，这份档案考察的并不是观察力本身，而是你如何使用已经找到的信息。"
+				"你拆开了档案袋。",
+				"从这一刻起，档案袋原本的封口状态已经被改变。回溯可以重看经过的节点，却不能让档案袋恢复到拆封前。",
+				"如果你此前已经检查并记录封口，相关证据仍然保留；如果没有，现在便无法再观察原始封口。"
 			],
 			"audio_clues": [], "text_clues": [], "room_refs": [],
 			"choices": [
 				{
-					"title": "继续查看训练档案",
-					"desc": "阅读调查规则，准备开始处理训练事件。",
+					"title": "返回调查枢纽",
+					"desc": "继续检查档案。",
 					"to": "tutorial_0003"
 				}
 			],
@@ -129,24 +117,55 @@
 			"node_id": "tutorial_0002c",
 			"title": "封口痕迹",
 			"icon_key": "investigation",
-			"node_type": "教学节点",
+			"node_type": "调查结果节点",
 			"location": "档案库 / 训练档案",
 			"time_label": "T-00",
 			"characters": ["你"],
-			"current_goal": "继续查看训练档案。",
+			"current_goal": "返回调查枢纽。",
+			"set_flags": {
+				"tutorial_seal_checked": true,
+				"tutorial_seal_evidence_found": true,
+				"tutorial_seal_evidence_lost": false
+			},
 			"body": [
-				"档案袋的封口很平整，但胶面边缘留下了一道极细的白痕。",
-				"它似乎曾经被拆开，又被重新粘好。",
-				"如果只看档案袋现在的样子，很容易认为它从未被打开。",
-				"但残留在胶面边缘的痕迹说明，表面状态并不能完整反映它曾经经历过什么。",
-				"这条痕迹并不属于训练事件本身，却提前提醒了你一件事：",
-				"记录现在呈现出的状态，不一定等于它真实经历过的状态。"
+				"档案袋尚未拆开。封口看似平整，但胶面边缘留下一道极细的白痕。",
+				"白痕沿着原有粘合线分布，说明封口很可能曾被拉开并再次粘合。",
+				"你在改变档案袋状态以前记录下了这条原始封口证据。"
 			],
 			"audio_clues": [], "text_clues": [], "room_refs": [],
 			"choices": [
 				{
-					"title": "继续查看训练档案",
-					"desc": "记下封口处的异常，继续阅读训练记录。",
+					"title": "返回调查枢纽",
+					"desc": "保留封口记录，继续检查档案。",
+					"to": "tutorial_0003"
+				}
+			],
+			"autosave": true
+		},
+		{
+			"node_id": "tutorial_0002d",
+			"title": "封口状态已改变",
+			"icon_key": "history",
+			"node_type": "调查结果节点",
+			"location": "档案库 / 训练档案",
+			"time_label": "T-00",
+			"characters": ["你"],
+			"current_goal": "返回调查枢纽。",
+			"set_flags": {
+				"tutorial_seal_checked": true,
+				"tutorial_seal_evidence_found": false,
+				"tutorial_seal_evidence_lost": true
+			},
+			"body": [
+				"档案袋已经被你拆开，当前边缘留下的是本次拆封后的状态。",
+				"你无法再分辨哪些痕迹原本就存在，也无法据此复原拆封前的封口。",
+				"原始封口证据已经永久损失；这不会阻止调查继续，但结论必须保留意见。"
+			],
+			"audio_clues": [], "text_clues": [], "room_refs": [],
+			"choices": [
+				{
+					"title": "返回调查枢纽",
+					"desc": "记录证据损失，继续检查档案。",
 					"to": "tutorial_0003"
 				}
 			],
@@ -154,26 +173,49 @@
 		},
 		{
 			"node_id": "tutorial_0003",
-			"title": "训练记录",
-			"icon_key": "document",
-			"node_type": "教学节点",
+			"title": "调查枢纽",
+			"icon_key": "investigation",
+			"node_type": "调查节点",
 			"location": "档案库 / 训练档案",
 			"time_label": "T-00",
 			"characters": ["你"],
-			"current_goal": "点击顶部的“回溯”，返回刚才查看的记录。",
+			"current_goal": "选择下一项调查操作；也可以使用回溯重看上一节点。",
 			"body": [
-				"档案袋中保存着一份已经封存的调查记录。",
-				"封存登记注明，工作人员在整理结束后放入了三页材料，并按顺序编号为第一页、第二页和第三页。",
-				"此后，档案袋被送入库房。登记系统中没有留下再次调阅的记录。",
-				"现在，这份档案被重新送到你面前。你的任务是检查档案当前的状态，并判断封存以后是否发生过变化。"
+				"档案袋的封面、封口和袋内材料可以分别检查。",
+				"检查顺序不会造成失败，但拆开档案袋会永久改变原始封口状态。",
+				"封存登记注明：整理结束时袋内共有三页材料，按顺序编号为第一页、第二页和第三页。"
 			],
 			"audio_clues": [], "text_clues": [], "room_refs": [],
 			"choices": [
 				{
+					"title": "查看档案封面",
+					"desc": "确认编号与用途，不改变封口状态。",
+					"to": "tutorial_0002a",
+					"requires_flags": {"tutorial_cover_checked": false}
+				},
+				{
+					"title": "检查档案袋封口",
+					"desc": "在拆封前观察并记录原始封口。",
+					"to": "tutorial_0002c",
+					"requires_flags": {"tutorial_bag_opened": false, "tutorial_seal_checked": false}
+				},
+				{
+					"title": "检查档案袋封口",
+					"desc": "档案袋已拆开，只能记录原始封口证据已损失。",
+					"to": "tutorial_0002d",
+					"requires_flags": {"tutorial_bag_opened": true, "tutorial_seal_checked": false}
+				},
+				{
+					"title": "拆开档案袋",
+					"desc": "打开档案袋；原始封口状态将无法恢复。",
+					"to": "tutorial_0002b",
+					"requires_flags": {"tutorial_bag_opened": false}
+				},
+				{
 					"title": "查看封存登记",
-					"desc": "确认档案封存时记录的状态。",
+					"desc": "档案袋已打开，可以比对登记与袋内材料。",
 					"to": "tutorial_0005",
-					"requires_flags": {"backtrack_tutorial_completed": true}
+					"requires_flags": {"tutorial_bag_opened": true}
 				}
 			],
 			"autosave": true
@@ -182,22 +224,14 @@
 			"node_id": "tutorial_0004",
 			"title": "查看来路",
 			"icon_key": "history",
-			"node_type": "回溯教学节点",
+			"node_type": "兼容节点",
 			"location": "档案库 / 训练档案",
 			"time_label": "T-00",
 			"characters": ["你"],
-			"current_goal": "继续检查档案。",
-			"body": [
-				"在继续检查档案以前，你可以先确认自己刚才经过了哪些记录。"
-			],
+			"current_goal": "返回调查枢纽。",
+			"body": ["此节点仅为旧存档兼容保留，新的调查流程不会进入这里。"],
 			"audio_clues": [], "text_clues": [], "room_refs": [],
-			"choices": [
-				{
-					"title": "查看封存登记",
-					"desc": "确认档案封存时记录的状态。",
-					"to": "tutorial_0005"
-				}
-			],
+			"choices": [{"title": "返回调查枢纽", "desc": "继续当前调查。", "to": "tutorial_0003"}],
 			"autosave": true
 		},
 		{
@@ -209,6 +243,7 @@
 			"time_label": "封存时",
 			"characters": ["你"],
 			"current_goal": "阅读封存登记。",
+			"set_flags": {"tutorial_archive_record_checked": true},
 			"body": [
 				"封存登记的字迹清楚，没有修改痕迹。",
 				"登记内容注明：档案袋内共有三页材料，编号连续，封口完成后由库房接收。",
@@ -218,8 +253,8 @@
 			"audio_clues": [], "text_clues": ["clue_tutorial_seal_record"], "room_refs": [],
 			"choices": [
 				{
-					"title": "检查当前档案",
-					"desc": "将登记内容与档案现在的状态进行比较。",
+					"title": "检查袋内材料",
+					"desc": "将登记数量与档案袋内的当前材料进行比较。",
 					"to": "tutorial_0006"
 				}
 			],
@@ -227,19 +262,104 @@
 		},
 		{
 			"node_id": "tutorial_0006",
-			"title": "当前档案",
+			"title": "袋内材料",
 			"icon_key": "investigation",
 			"node_type": "调查节点",
 			"location": "档案库 / 当前档案",
 			"time_label": "复核时",
 			"characters": ["你"],
-			"current_goal": "提取关键词“封口白痕”。",
+			"current_goal": "提取关键词“页码缺口”。",
+			"set_flags": {"tutorial_file_contents_checked": true, "tutorial_page_gap_found": true},
 			"body": [
-				"档案袋表面没有明显破口，封口也仍然贴合。",
-				"但在胶面边缘，可以看到一道细窄的封口白痕。白痕恰好沿着粘合线分布，部分胶层已经失去原本的光泽。",
-				"你暂时没有翻动袋内的文件。"
+				"档案袋内只剩两张纸。",
+				"第一页右下角标着“1 / 3”，另一张标着“3 / 3”。两张纸之间没有夹页，也没有装订脱落留下的碎屑。",
+				"现存第一页和第三页之间形成了清楚的页码缺口，与封存登记中的“三页材料”不一致。"
 			],
-			"graph_targets": ["tutorial_inference_seal"],
+			"graph_targets": ["tutorial_inference_file_change"],
+			"audio_clues": [], "text_clues": ["clue_tutorial_page_gap"], "room_refs": [],
+			"choices": [],
+			"autosave": true
+		},
+		{
+			"node_id": "tutorial_inference_file_change",
+			"title": "文件数量发生变化",
+			"icon_key": "deduction",
+			"node_type": "推断目标",
+			"location": "训练推断",
+			"time_label": "T-00",
+			"characters": ["你"],
+			"graph_only": true,
+			"body": ["档案当前只剩第一页和第三页，文件数量与封存登记不一致。"],
+			"audio_clues": [], "text_clues": [], "room_refs": [], "choices": [],
+			"autosave": false
+		},
+		{
+			"node_id": "tutorial_0007",
+			"title": "推理复核",
+			"icon_key": "investigation",
+			"node_type": "调查节点",
+			"location": "档案库 / 当前档案",
+			"time_label": "复核时",
+			"characters": ["你"],
+			"current_goal": "检验无效连接和无法确认的责任归属。",
+			"body": [
+				"档案封面仍印着T-00编号，但编号只能识别档案，不能证明文件数量发生变化。",
+				"你还需要辨别：证据能够支持客观状态，却不能在没有人员记录时指向具体责任人。"
+			],
+			"graph_targets": ["tutorial_inference_file_change", "tutorial_hypothesis_admin"],
+			"audio_clues": [], "text_clues": ["clue_tutorial_archive_id"], "room_refs": [],
+			"choices": [
+				{
+					"title": "复核封口异常",
+					"desc": "使用拆封前记录的原始封口证据补充结论。",
+					"to": "tutorial_0007s",
+					"requires_flags": {
+						"tutorial_page_connection_completed": true,
+						"tutorial_invalid_connection_seen": true,
+						"tutorial_returned_safe": true,
+						"tutorial_seal_evidence_found": true,
+						"tutorial_seal_connection_completed": false
+					}
+				},
+				{
+					"title": "形成完整复核结论",
+					"desc": "页码与原始封口证据均已建立永久连接。",
+					"to": "tutorial_0009a",
+					"requires_flags": {
+						"tutorial_page_connection_completed": true,
+						"tutorial_invalid_connection_seen": true,
+						"tutorial_returned_safe": true,
+						"tutorial_seal_connection_completed": true
+					}
+				},
+				{
+					"title": "形成保留意见结论",
+					"desc": "确认页码缺口，并对无法核实的封口状态保留意见。",
+					"to": "tutorial_0009b",
+					"requires_flags": {
+						"tutorial_page_connection_completed": true,
+						"tutorial_invalid_connection_seen": true,
+						"tutorial_returned_safe": true,
+						"tutorial_seal_connection_completed": false
+					}
+				}
+			],
+			"autosave": true
+		},
+		{
+			"node_id": "tutorial_0007s",
+			"title": "封口异常复核",
+			"icon_key": "investigation",
+			"node_type": "可选调查节点",
+			"location": "档案库 / 当前档案",
+			"time_label": "复核时",
+			"characters": ["你"],
+			"current_goal": "提取关键词“封口白痕”并连接到“封口状态异常”。",
+			"body": [
+				"你调出拆开档案袋以前留下的记录。胶面边缘存在一道沿原粘合线分布的封口白痕。",
+				"这条原始记录能够支持“封口状态异常”，但不能确认由谁处理过档案袋。"
+			],
+			"graph_targets": ["tutorial_inference_seal", "tutorial_hypothesis_admin", "tutorial_0007"],
 			"audio_clues": [], "text_clues": ["clue_tutorial_seal_mark"], "room_refs": [],
 			"choices": [],
 			"autosave": true
@@ -253,45 +373,7 @@
 			"time_label": "T-00",
 			"characters": ["你"],
 			"graph_only": true,
-			"body": ["档案袋当前的封口状态与正常封存状态并不一致。"],
-			"audio_clues": [], "text_clues": [], "room_refs": [], "choices": [],
-			"autosave": false
-		},
-		{
-			"node_id": "tutorial_0007",
-			"title": "袋内文件",
-			"icon_key": "investigation",
-			"node_type": "调查节点",
-			"location": "档案库 / 当前档案",
-			"time_label": "复核时",
-			"characters": ["你"],
-			"current_goal": "检查袋内文件。",
-			"body": [
-				"档案袋内只剩两张纸。",
-				"第一张右下角标着“1 / 3”，第二张标着“3 / 3”。两张纸之间没有夹页，也没有装订脱落留下的碎屑。",
-				"档案封面仍然印着T-00编号。",
-				"两张纸之间连续中断的页码缺口，与封存登记中“三页材料”的记录并不一致。"
-			],
-			"graph_targets": [
-				"tutorial_inference_file_change",
-				"tutorial_hypothesis_admin"
-			],
-			"audio_clues": [],
-			"text_clues": ["clue_tutorial_archive_id", "clue_tutorial_page_gap"],
-			"room_refs": [],
-			"choices": [],
-			"autosave": true
-		},
-		{
-			"node_id": "tutorial_inference_file_change",
-			"title": "文件数量发生变化",
-			"icon_key": "deduction",
-			"node_type": "推断目标",
-			"location": "训练推断",
-			"time_label": "T-00",
-			"characters": ["你"],
-			"graph_only": true,
-			"body": ["档案当前的文件数量与封存登记不一致。"],
+			"body": ["拆封前记录的白痕说明原始封口很可能经过再次粘合。"],
 			"audio_clues": [], "text_clues": [], "room_refs": [], "choices": [],
 			"autosave": false
 		},
@@ -318,15 +400,15 @@
 			"characters": ["你"],
 			"current_goal": "返回最近的安全节点。",
 			"body": [
-				"封口白痕可以支持“档案袋曾被重新处理”这一判断。",
-				"但它不能说明是谁打开了档案袋，也不能证明打开档案袋的人取走了第二页。",
-				"你已经确认封口状态发生过变化，却在缺少人员记录的情况下，把这一变化归到了档案管理员身上。"
+				"页码缺口能够证明当前文件数量与封存登记不一致；封口白痕若被保留，也只能说明原始封口很可能经过再次处理。",
+				"这些证据都不能说明是谁打开档案、是谁取走第二页，或管理员应对此负责。",
+				"错误推断不会让训练失败。返回最近的安全节点后，已经建立的正确连接和调查状态都会保留。"
 			],
 			"audio_clues": [], "text_clues": [], "room_refs": [],
 			"choices": [
 				{
 					"title": "返回最近的安全节点",
-					"desc": "返回进入错误推断之前的最近安全节点。",
+					"desc": "保留调查状态，返回进入错误推断前的最近安全节点。",
 					"action": "load_last_safe_autosave"
 				}
 			],
@@ -336,12 +418,12 @@
 			"node_id": "tutorial_inference_final",
 			"title": "档案内容在封存后发生变化",
 			"icon_key": "deduction",
-			"node_type": "最终推断",
+			"node_type": "兼容推断节点",
 			"location": "训练推断",
 			"time_label": "T-00",
 			"characters": ["你"],
 			"graph_only": true,
-			"body": ["档案袋在封存后被重新打开，第二页也在封存后缺失。"],
+			"body": ["此节点仅为旧存档兼容保留，新的调查流程使用差异化结论。"],
 			"audio_clues": [], "text_clues": [], "room_refs": [], "choices": [],
 			"autosave": false
 		},
@@ -349,25 +431,59 @@
 			"node_id": "tutorial_0009",
 			"title": "复核结果",
 			"icon_key": "deduction",
+			"node_type": "兼容结论节点",
+			"location": "训练推断",
+			"time_label": "T-00",
+			"characters": ["你"],
+			"current_goal": "查看当前训练结果。",
+			"body": ["此节点仅为旧存档兼容保留，新的调查流程不会进入这里。"],
+			"audio_clues": [], "text_clues": [], "room_refs": [],
+			"choices": [{"title": "查看训练结果", "desc": "继续完成训练。", "to": "tutorial_0010"}],
+			"autosave": true
+		},
+		{
+			"node_id": "tutorial_0009a",
+			"title": "完整复核结论",
+			"icon_key": "deduction",
 			"node_type": "结论节点",
 			"location": "训练推断",
 			"time_label": "T-00",
 			"characters": ["你"],
 			"current_goal": "完成训练。",
+			"set_flags": {
+				"tutorial_result_complete_review": true,
+				"tutorial_result_reserved_opinion": false
+			},
 			"body": [
-				"封存登记显示，档案入库时共有三页材料，封口状态完整。",
-				"当前档案只保留了第一页和第三页，胶面边缘还存在重新处理留下的痕迹。",
-				"可以确认的是：这份档案在封存后被重新打开，第二页也在此后缺失。",
-				"现有记录无法确认打开档案的人，也无法说明缺失页去了哪里。"
+				"封存登记记载袋内共有三页材料；当前只剩第一页和第三页，文件数量与登记不一致。",
+				"拆封前记录的白痕说明原始封口经过再次处理。",
+				"两项证据合并后，可以判断档案内容很可能在完成封口以后发生了变化。",
+				"现有证据仍不能确认责任人、第二页由谁取走、缺失页内容或处理动机。"
 			],
 			"audio_clues": [], "text_clues": [], "room_refs": [],
-			"choices": [
-				{
-					"title": "查看训练结果",
-					"desc": "确认本次训练中已经完成的调查操作。",
-					"to": "tutorial_0010"
-				}
+			"choices": [{"title": "查看训练结果", "desc": "确认完整复核结论并完成训练。", "to": "tutorial_0010"}],
+			"autosave": true
+		},
+		{
+			"node_id": "tutorial_0009b",
+			"title": "保留意见结论",
+			"icon_key": "deduction",
+			"node_type": "结论节点",
+			"location": "训练推断",
+			"time_label": "T-00",
+			"characters": ["你"],
+			"current_goal": "完成训练。",
+			"set_flags": {
+				"tutorial_result_complete_review": false,
+				"tutorial_result_reserved_opinion": true
+			},
+			"body": [
+				"当前档案袋内只剩第一页和第三页，文件数量与封存登记不一致，第二页目前缺失。",
+				"由于没有保留可核实的原始封口证据，现阶段无法确认第二页是在封口前还是封口后缺失。",
+				"同样无法确认档案袋是否曾被重新打开，也不能排除封存登记本身存在记录误差。"
 			],
+			"audio_clues": [], "text_clues": [], "room_refs": [],
+			"choices": [{"title": "查看训练结果", "desc": "确认保留意见结论并完成训练。", "to": "tutorial_0010"}],
 			"autosave": true
 		},
 		{

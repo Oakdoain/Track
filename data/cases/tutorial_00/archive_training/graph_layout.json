@@ -6,17 +6,21 @@
 		"tutorial_0002a": [300, 390],
 		"tutorial_0002b": [820, 390],
 		"tutorial_0002c": [1340, 390],
+		"tutorial_0002d": [1600, 570],
 		"tutorial_0003": [820, 570],
 		"tutorial_0004": [820, 750],
 		"tutorial_0005": [820, 930],
 		"tutorial_0006": [500, 1110],
 		"tutorial_inference_seal": [1080, 1110],
 		"tutorial_0007": [500, 1290],
+		"tutorial_0007s": [160, 1470],
 		"tutorial_inference_file_change": [990, 1290],
 		"tutorial_hypothesis_admin": [1450, 1290],
 		"tutorial_0008e": [1450, 1470],
 		"tutorial_inference_final": [990, 1640],
 		"tutorial_0009": [500, 1640],
+		"tutorial_0009a": [330, 1640],
+		"tutorial_0009b": [850, 1640],
 		"tutorial_0010": [500, 1810]
 	}
 }

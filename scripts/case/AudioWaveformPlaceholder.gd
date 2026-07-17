@@ -1,20 +1,21 @@
 extends Control
 
 signal seek_requested(progress_ratio: float)
+signal playhead_drag_started(progress_ratio: float)
+signal playhead_drag_updated(progress_ratio: float)
+signal playhead_drag_finished(progress_ratio: float)
+signal playhead_drag_cancelled(progress_ratio: float)
 
 const WAVE_COLOR := Color("#123FA4")
 const WAVE_SOFT := Color("#8FA8F2")
 const CENTER_LINE := Color("#D7DEF3")
 const PROGRESS_COLOR := Color("#0A318A")
-const MARKER_COLOR := Color("#1044B2")
 const EMPTY_TEXT_COLOR := Color("#8995B8")
 const HORIZONTAL_PADDING: float = 18.0
 const VERTICAL_PADDING: float = 18.0
 const TARGET_BAR_SPACING: float = 7.0
-const PLAYHEAD_HIT_HALF_WIDTH: float = 8.0
 
 var _progress_ratio: float = 0.0
-var _marker_ratios: PackedFloat32Array = PackedFloat32Array()
 var _waveform_samples: PackedFloat32Array = PackedFloat32Array()
 var _drag_enabled: bool = false
 var _is_dragging_playhead: bool = false
@@ -44,25 +45,17 @@ func set_drag_enabled(enabled: bool) -> void:
 		mouse_default_cursor_shape = Control.CURSOR_ARROW
 
 
-func cancel_playhead_drag() -> void:
+func cancel_playhead_drag(notify_cancelled: bool = true) -> void:
+	var was_dragging := _is_dragging_playhead
 	_is_dragging_playhead = false
 	_dragged_progress = _progress_ratio
+
+	if was_dragging and notify_cancelled:
+		playhead_drag_cancelled.emit(_dragged_progress)
 
 
 func is_dragging_playhead() -> bool:
 	return _is_dragging_playhead
-
-
-func set_marker_ratios(values: PackedFloat32Array) -> void:
-	_marker_ratios.clear()
-
-	for value in values:
-		if is_nan(value) or is_inf(value):
-			continue
-
-		_marker_ratios.append(clampf(value, 0.0, 1.0))
-
-	queue_redraw()
 
 
 func set_waveform_samples(values: PackedFloat32Array) -> void:
@@ -126,18 +119,6 @@ func _draw() -> void:
 				true
 			)
 
-	var marker_half_height: float = maxf(1.0, center_y - VERTICAL_PADDING)
-
-	for marker_ratio in _marker_ratios:
-		var marker_x: float = start_x + usable_width * marker_ratio
-		draw_line(
-			Vector2(marker_x, center_y - marker_half_height),
-			Vector2(marker_x, center_y + marker_half_height),
-			MARKER_COLOR,
-			2.0,
-			true
-		)
-
 	var progress_x: float = start_x + usable_width * _progress_ratio
 	draw_line(
 		Vector2(progress_x, 7.0),
@@ -168,32 +149,49 @@ func _gui_input(event: InputEvent) -> void:
 			return
 
 		if mouse_event.pressed:
-			if absf(mouse_event.position.x - _get_playhead_x()) > PLAYHEAD_HIT_HALF_WIDTH:
-				return
-
 			_is_dragging_playhead = true
 			_update_dragged_progress(mouse_event.position.x)
-			accept_event()
-		elif _is_dragging_playhead:
-			_update_dragged_progress(mouse_event.position.x)
-			_is_dragging_playhead = false
+			playhead_drag_started.emit(_dragged_progress)
 			accept_event()
 
 		return
 
-	if event is InputEventMouseMotion:
+	if event is InputEventMouseMotion and not _is_dragging_playhead:
 		var motion_event: InputEventMouseMotion = event as InputEventMouseMotion
-
-		if _is_dragging_playhead and (motion_event.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0:
-			_update_dragged_progress(motion_event.position.x)
-			accept_event()
-			return
-
 		mouse_default_cursor_shape = (
 			Control.CURSOR_HSIZE
-			if absf(motion_event.position.x - _get_playhead_x()) <= PLAYHEAD_HIT_HALF_WIDTH
+			if Rect2(Vector2.ZERO, size).has_point(motion_event.position)
 			else Control.CURSOR_ARROW
 		)
+
+
+func _input(event: InputEvent) -> void:
+	if not _is_dragging_playhead:
+		return
+
+	if event is InputEventMouseMotion:
+		var motion_event := event as InputEventMouseMotion
+
+		if (motion_event.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0:
+			_update_dragged_progress(_viewport_to_local_x(motion_event.position))
+			playhead_drag_updated.emit(_dragged_progress)
+			get_viewport().set_input_as_handled()
+		else:
+			_finish_playhead_drag(true)
+		return
+
+	if event is InputEventMouseButton:
+		var mouse_event := event as InputEventMouseButton
+
+		if mouse_event.button_index == MOUSE_BUTTON_LEFT and not mouse_event.pressed:
+			_update_dragged_progress(_viewport_to_local_x(mouse_event.position))
+			_finish_playhead_drag(false)
+			get_viewport().set_input_as_handled()
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and _is_dragging_playhead:
+		_finish_playhead_drag(true)
 
 
 func _update_dragged_progress(mouse_x: float) -> void:
@@ -201,12 +199,23 @@ func _update_dragged_progress(mouse_x: float) -> void:
 	_dragged_progress = clampf((mouse_x - HORIZONTAL_PADDING) / usable_width, 0.0, 1.0)
 	_progress_ratio = _dragged_progress
 	queue_redraw()
-	seek_requested.emit(_dragged_progress)
 
 
-func _get_playhead_x() -> float:
-	var usable_width: float = maxf(1.0, size.x - HORIZONTAL_PADDING * 2.0)
-	return HORIZONTAL_PADDING + usable_width * _progress_ratio
+func _finish_playhead_drag(cancelled: bool) -> void:
+	if not _is_dragging_playhead:
+		return
+
+	_is_dragging_playhead = false
+
+	if cancelled:
+		playhead_drag_cancelled.emit(_dragged_progress)
+	else:
+		playhead_drag_finished.emit(_dragged_progress)
+		seek_requested.emit(_dragged_progress)
+
+
+func _viewport_to_local_x(viewport_position: Vector2) -> float:
+	return (get_global_transform_with_canvas().affine_inverse() * viewport_position).x
 
 
 func _draw_empty_state(start_x: float, center_y: float, usable_width: float) -> void:

@@ -107,7 +107,9 @@ func report_save_result(result: Dictionary, slot_index: int) -> void:
 		selected_slot_index = slot_index
 		_refresh_summaries(true)
 	else:
-		feedback_label.text = "保存失败：" + str(result.get("error", "未知错误"))
+		# Detailed failures are logged by SaveManager and presented by MainUI's
+		# non-dismissive central modal. Keep the save page free of internal data.
+		feedback_label.text = ""
 
 
 func _build_ui() -> void:

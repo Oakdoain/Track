@@ -49,6 +49,7 @@ var _confirmation_previous_focus: Control
 
 
 func _ready() -> void:
+	_ensure_input_actions()
 	_setup_window()
 	registry_loader = CaseDataLoader.new()
 
@@ -76,10 +77,9 @@ func _ready() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if not (event is InputEventKey):
+	if not event.is_action_pressed("ui_cancel_layer"):
 		return
-	var key_event: InputEventKey = event as InputEventKey
-	if key_event.keycode != KEY_ESCAPE or not key_event.pressed or key_event.echo:
+	if event is InputEventKey and (event as InputEventKey).echo:
 		return
 
 	if _confirmation_overlay.visible:
@@ -100,6 +100,25 @@ func _unhandled_input(event: InputEvent) -> void:
 	if archive_ui != null and is_instance_valid(archive_ui):
 		_return_from_archive()
 		get_viewport().set_input_as_handled()
+
+
+func _ensure_input_actions() -> void:
+	var shortcuts := {
+		"toggle_story_graph": KEY_TAB,
+		"ui_cancel_layer": KEY_ESCAPE,
+		"audio_play_pause": KEY_SPACE,
+		"ui_confirm": KEY_ENTER,
+		"ui_focus_up": KEY_UP,
+		"ui_focus_down": KEY_DOWN
+	}
+	for action_value in shortcuts.keys():
+		var action := str(action_value)
+		if not InputMap.has_action(action):
+			InputMap.add_action(action)
+		if InputMap.action_get_events(action).is_empty():
+			var key_event := InputEventKey.new()
+			key_event.keycode = shortcuts[action]
+			InputMap.action_add_event(action, key_event)
 
 
 func _setup_window() -> void:

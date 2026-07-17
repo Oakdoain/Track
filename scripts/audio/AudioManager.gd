@@ -19,6 +19,11 @@ var _last_progress_second: int = -1
 var _streams_by_id: Dictionary = {}
 var _durations_by_id: Dictionary = {}
 var _unavailable_audio_ids: Dictionary = {}
+var _scrub_players: Array[AudioStreamPlayer] = []
+var _scrub_tweens: Dictionary = {}
+var _scrub_player_index: int = 0
+var _last_scrub_preview_msec: int = 0
+var _scrub_audio_id: String = ""
 
 
 func _ready() -> void:
@@ -26,6 +31,12 @@ func _ready() -> void:
 	_player.name = "AudioStreamPlayer"
 	add_child(_player)
 	_player.finished.connect(_on_player_finished)
+	for index in range(2):
+		var scrub_player := AudioStreamPlayer.new()
+		scrub_player.name = "ScrubPreview%d" % (index + 1)
+		scrub_player.volume_db = -30.0
+		add_child(scrub_player)
+		_scrub_players.append(scrub_player)
 	load_audio_data(DEFAULT_AUDIO_DATA_PATH)
 
 
@@ -46,6 +57,15 @@ func _process(_delta: float) -> void:
 
 
 func load_audio_data(path: String) -> bool:
+	if _player != null:
+		_player.stop()
+		_player.stream_paused = false
+		_player.stream = null
+
+	current_audio_id = ""
+	_is_paused = false
+	_pending_seek_position = 0.0
+	_last_progress_second = -1
 	audio_data.clear()
 	audio_by_id.clear()
 	_streams_by_id.clear()
@@ -195,6 +215,51 @@ func seek_audio(time: float) -> void:
 		_pending_seek_position = target_time
 
 	audio_progress_changed.emit(current_audio_id, target_time, duration)
+
+
+func begin_scrub(audio_id: String) -> bool:
+	if not _load_stream_for_id(audio_id):
+		return false
+	_scrub_audio_id = audio_id
+	_last_scrub_preview_msec = 0
+	return true
+
+
+func scrub_to(time: float) -> void:
+	if _scrub_audio_id == "" or not _streams_by_id.has(_scrub_audio_id):
+		return
+	var now := Time.get_ticks_msec()
+	if now - _last_scrub_preview_msec < 50:
+		return
+	_last_scrub_preview_msec = now
+	var player_index := _scrub_player_index
+	var player := _scrub_players[player_index]
+	_scrub_player_index = (_scrub_player_index + 1) % _scrub_players.size()
+	var prior_tween: Tween = _scrub_tweens.get(player_index) as Tween
+	if prior_tween != null and prior_tween.is_valid():
+		prior_tween.kill()
+	if player.stream != _streams_by_id[_scrub_audio_id]:
+		player.stream = _streams_by_id[_scrub_audio_id]
+	player.stop()
+	player.volume_db = -28.0
+	player.play(clampf(_sanitize_time(time), 0.0, maxf(0.0, get_audio_duration(_scrub_audio_id) - 0.01)))
+	var tween := create_tween()
+	_scrub_tweens[player_index] = tween
+	tween.tween_property(player, "volume_db", -4.0, 0.018)
+	tween.tween_interval(0.085)
+	tween.tween_property(player, "volume_db", -30.0, 0.022)
+	tween.tween_callback(player.stop)
+
+
+func end_scrub() -> void:
+	_scrub_audio_id = ""
+	for tween in _scrub_tweens.values():
+		if tween != null and tween.is_valid():
+			tween.kill()
+	_scrub_tweens.clear()
+	for player in _scrub_players:
+		player.stop()
+		player.volume_db = -30.0
 
 
 func is_audio_available(audio_id: String) -> bool:

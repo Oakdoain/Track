@@ -8,6 +8,10 @@ signal case_completion_requested(case_id: String)
 
 const AudioWaveformPlaceholder := preload("res://scripts/case/AudioWaveformPlaceholder.gd")
 const CaseGraphCanvasScript := preload("res://scripts/case/CaseGraphCanvas.gd")
+const GraphDashedBorderScript := preload("res://scripts/case/GraphDashedBorder.gd")
+const NarrativeGraphLayoutScript := preload("res://scripts/case/NarrativeGraphLayout.gd")
+const KenneyAssetCatalog := preload("res://scripts/ui/KenneyAssetCatalog.gd")
+const TutorialModalScript := preload("res://scripts/ui/TutorialModal.gd")
 const SaveUIScene := preload("res://scenes/ui/SaveUI.tscn")
 const LoadUIScene := preload("res://scenes/ui/LoadUI.tscn")
 
@@ -21,10 +25,10 @@ const RIGHT_PANEL_WIDTH := 400
 const STORY_CONTENT_WIDTH := 920
 const IMAGE_CARD_HEIGHT := 540
 const GRAPH_NODE_SIZE := Vector2(260, 96)
+const GRAPH_INFERENCE_NODE_SIZE := Vector2(300, 96)
 const GRAPH_CURRENT_ANCHOR := Vector2(0.5, 0.32)
 const KEYWORD_GRAPH_MIN_SIZE := Vector2(150, 36)
 const KEYWORD_GRAPH_MAX_WIDTH := 220.0
-const KEYWORD_GRAPH_OFFSET := 20.0
 const KEYWORD_GRAPH_GAP := 8.0
 const GRAPH_STATUS_SIZE := Vector2(340, 76)
 const CASE_STATUS_SIZE := Vector2(380, 48)
@@ -32,6 +36,9 @@ const KEYWORD_META_PREFIX := "keyword://"
 const KEYWORD_POPUP_MAX_WIDTH := 220.0
 const KEYWORD_POPUP_OFFSET := Vector2(16.0, 16.0)
 const KEYWORD_POPUP_VIEW_MARGIN := 8.0
+const NAV_HOVER_DURATION := 0.12
+const NAV_PRESS_DURATION := 0.07
+const NAV_RELEASE_DURATION := 0.12
 
 const TOP_BAR_MARGIN_LEFT := 24
 const TOP_BAR_MARGIN_RIGHT := 24
@@ -59,6 +66,9 @@ const C_TEXT := Color("#26314C")
 const C_SUBTEXT := Color("#5B6684")
 const C_MUTED := Color("#8995B8")
 const C_WHITE := Color("#FFFFFF")
+const C_KENNEY_BLUE := Color("#143FA4")
+const C_KENNEY_DISABLED := Color("#9AADE8")
+const C_WARNING := Color("#9E2F3E")
 
 const FONT_PUBLIC_REGULAR := preload("res://assets/fonts/PublicSans-Regular.ttf")
 const FONT_MONO_REGULAR := preload("res://assets/fonts/IBMPlexMono-Regular.ttf")
@@ -80,6 +90,8 @@ const ICON_RECTANGLE_HORIZONTAL := preload("res://assets/icons/lucide/rectangle-
 const ICON_FOOTPRINTS := preload("res://assets/icons/lucide/footprints.svg")
 const ICON_BOOKMARK := preload("res://assets/icons/lucide/bookmark.svg")
 const ICON_REFRESH_CW := preload("res://assets/icons/lucide/refresh-cw.svg")
+const ICON_LIGHTBULB := preload("res://assets/icons/lucide/lightbulb.svg")
+const ICON_LOCK := preload("res://assets/icons/lucide/lock.svg")
 const ICON_PLAY := preload("res://assets/icons/lucide/play.svg")
 const ICON_PAUSE := preload("res://assets/icons/lucide/pause.svg")
 
@@ -110,6 +122,8 @@ var chapter_intro_label: Label
 var loader: CaseDataLoader
 var runtime_state: CaseRuntimeState
 var audio_manager: Node
+var ui_sound_manager: Node
+var cursor_manager: Node
 var save_manager: SaveManager
 
 var target_text_label: Label
@@ -122,6 +136,7 @@ var story_scroll: ScrollContainer
 var audio_slot: VBoxContainer
 var _audio_card_controls: Dictionary = {}
 var _audio_waveform_cache: Dictionary = {}
+var _audio_waveform_drag_state: Dictionary = {}
 var _audio_finished_id: String = ""
 var _audio_feedback_generation: int = 0
 var image_slot: VBoxContainer
@@ -132,20 +147,39 @@ var choice_title_label: Label
 var choice_list: VBoxContainer
 var keyword_popup_node: PanelContainer
 var keyword_context_menu: PanelContainer
-var _node_history: PackedStringArray = PackedStringArray()
 
 var graph_scroll: ScrollContainer
+var graph_zoom_container: Control
 var graph_canvas: CaseGraphCanvas
 var graph_status_panel: PanelContainer
+var graph_status_icon: TextureRect
 var graph_status_label: Label
 var _selected_keyword_instance_id: String = ""
 var _graph_feedback_generation: int = 0
 var _keyword_graph_layout: Dictionary = {}
+var _graph_node_positions: Dictionary = {}
+var _graph_node_sizes: Dictionary = {}
+var _graph_node_depths: Dictionary = {}
+var _graph_zoom: float = 1.0
+var _graph_has_fit: bool = false
+var _graph_pan_active: bool = false
+var _graph_pan_dragged: bool = false
+var _graph_pan_start_mouse := Vector2.ZERO
+var _graph_pan_start_scroll := Vector2.ZERO
+var _graph_canvas_size := Vector2.ZERO
+
+var tutorial_modal: Control
+var _tutorial_modal_queue: Array[Dictionary] = []
+var _tutorial_modal_show_scheduled: bool = false
+var _failure_hint_modal_active: bool = false
+var _save_error_modal_active: bool = false
 
 var current_node_title: Label
 var current_node_body: Label
 var clue_list: VBoxContainer
 var graph_slot: VBoxContainer
+var mini_viewport_rect: Control
+var _mini_graph_bounds := Rect2()
 
 var attr_type_value: Label
 var attr_location_value: Label
@@ -220,6 +254,7 @@ func _ready() -> void:
 	_build_ui()
 	_build_data_pages()
 	_setup_audio_manager()
+	_setup_tutorial_assets()
 	if not _initialize_case_for_startup():
 		initialization_failed.emit(
 			_initialization_error if _initialization_error != "" else "案件初始化失败"
@@ -234,6 +269,9 @@ func _ready() -> void:
 func _exit_tree() -> void:
 	_stop_audio_for_context_change()
 
+	if _is_tutorial_case() and cursor_manager != null:
+		cursor_manager.call("deactivate_tutorial")
+
 
 func _process(_delta: float) -> void:
 	var viewport_size: Vector2 = get_viewport_rect().size
@@ -245,6 +283,28 @@ func _process(_delta: float) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	if _graph_pan_active:
+		if event is InputEventMouseMotion:
+			var motion := event as InputEventMouseMotion
+			var delta := motion.global_position - _graph_pan_start_mouse
+			if delta.length() >= 5.0:
+				_graph_pan_dragged = true
+				_set_tutorial_cursor("drag")
+			graph_scroll.scroll_horizontal = maxi(0, roundi(_graph_pan_start_scroll.x - delta.x))
+			graph_scroll.scroll_vertical = maxi(0, roundi(_graph_pan_start_scroll.y - delta.y))
+			_sync_graph_view_to_runtime()
+			_update_mini_viewport_rect()
+			get_viewport().set_input_as_handled()
+			return
+		if event is InputEventMouseButton and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT and not (event as InputEventMouseButton).pressed:
+			_graph_pan_active = false
+			_set_tutorial_cursor("default")
+			get_viewport().set_input_as_handled()
+			return
+
+	if tutorial_modal != null and is_instance_valid(tutorial_modal):
+		return
+
 	if keyword_context_menu != null and is_instance_valid(keyword_context_menu):
 		if event is InputEventMouseButton:
 			var mouse_event: InputEventMouseButton = event as InputEventMouseButton
@@ -256,29 +316,70 @@ func _input(event: InputEvent) -> void:
 			):
 				_close_keyword_context_menu()
 
-	if event is InputEventKey:
-		var key_event: InputEventKey = event as InputEventKey
-
-		if (
-			key_event.keycode == KEY_ESCAPE
-			and key_event.pressed
-			and not key_event.echo
-			and keyword_context_menu != null
-		):
+	if event.is_action_pressed("ui_cancel_layer"):
+		if keyword_context_menu != null:
 			_close_keyword_context_menu()
 			get_viewport().set_input_as_handled()
 			return
-
-		if (
-			key_event.keycode == KEY_ESCAPE
-			and key_event.pressed
-			and not key_event.echo
-			and _selected_keyword_instance_id != ""
-		):
+		if _selected_keyword_instance_id != "":
 			_cancel_keyword_connection_selection(true)
 			get_viewport().set_input_as_handled()
-
+			return
+		if not _audio_waveform_drag_state.is_empty():
+			_cancel_active_audio_scrub()
+			get_viewport().set_input_as_handled()
+			return
+		if _data_page_open:
+			_return_from_data_page()
+			get_viewport().set_input_as_handled()
 		return
+
+	if _settings_source_context != "" or _data_page_open:
+		return
+
+	if event.is_action_pressed("toggle_story_graph"):
+		if _selected_keyword_instance_id != "":
+			_cancel_keyword_connection_selection(true)
+		else:
+			_show_story_view() if graph_view.visible else _show_graph_view()
+		get_viewport().set_input_as_handled()
+		return
+
+	if event.is_action_pressed("audio_play_pause") and story_view.visible and _audio_waveform_drag_state.is_empty():
+		var focus_owner := get_viewport().gui_get_focus_owner()
+		if focus_owner is LineEdit or focus_owner is TextEdit:
+			return
+		var current_data := loader.get_node(runtime_state.current_node_id)
+		var audio_id := _first_array_value(current_data.get("audio_clues", []), "")
+		if audio_id != "":
+			_on_audio_play_pressed(audio_id)
+			get_viewport().set_input_as_handled()
+		return
+
+	if event.is_action_pressed("ui_focus_up") or event.is_action_pressed("ui_focus_down"):
+		_focus_story_choice(-1 if event.is_action_pressed("ui_focus_up") else 1)
+		get_viewport().set_input_as_handled()
+		return
+
+	if event.is_action_pressed("ui_confirm"):
+		var focus_owner := get_viewport().gui_get_focus_owner()
+		if focus_owner is BaseButton:
+			(focus_owner as BaseButton).pressed.emit()
+			get_viewport().set_input_as_handled()
+		return
+
+
+func _focus_story_choice(direction: int) -> void:
+	var buttons: Array[Button] = []
+	for node in choice_list.find_children("*", "Button", true, false):
+		if node is Button and not (node as Button).disabled:
+			buttons.append(node as Button)
+	if buttons.is_empty():
+		return
+	var current := get_viewport().gui_get_focus_owner()
+	var index := buttons.find(current)
+	index = 0 if index < 0 else posmod(index + direction, buttons.size())
+	buttons[index].grab_focus()
 
 
 func _setup_window() -> void:
@@ -653,12 +754,19 @@ func _build_center_panel() -> Control:
 	_fill_rect(graph_scroll)
 	graph_view.add_child(graph_scroll)
 
+	graph_zoom_container = Control.new()
+	graph_zoom_container.name = "GraphZoomContainer"
+	graph_zoom_container.mouse_filter = Control.MOUSE_FILTER_PASS
+	graph_zoom_container.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	graph_zoom_container.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	graph_scroll.add_child(graph_zoom_container)
 	graph_canvas = CaseGraphCanvasScript.new()
 	graph_canvas.name = "GraphCanvas"
-	graph_canvas.mouse_filter = Control.MOUSE_FILTER_PASS
+	graph_canvas.mouse_filter = Control.MOUSE_FILTER_STOP
 	graph_canvas.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	graph_canvas.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	graph_scroll.add_child(graph_canvas)
+	graph_canvas.gui_input.connect(_on_graph_canvas_gui_input)
+	graph_zoom_container.add_child(graph_canvas)
 
 	graph_status_panel = _build_graph_status_panel()
 	graph_view.add_child(graph_status_panel)
@@ -685,11 +793,26 @@ func _build_graph_status_panel() -> PanelContainer:
 	margin.add_theme_constant_override("margin_bottom", 9)
 	panel.add_child(margin)
 
+	var row := HBoxContainer.new()
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_theme_constant_override("separation", 10)
+	margin.add_child(row)
+
+	graph_status_icon = TextureRect.new()
+	graph_status_icon.custom_minimum_size = Vector2(24, 24)
+	graph_status_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	graph_status_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	graph_status_icon.modulate = C_BLUE
+	graph_status_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	graph_status_icon.visible = false
+	row.add_child(graph_status_icon)
+
 	graph_status_label = _label("", 14, C_BLUE, FONT_SERIF_SEMIBOLD)
 	graph_status_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	graph_status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	graph_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	graph_status_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	margin.add_child(graph_status_label)
+	row.add_child(graph_status_label)
 	return panel
 
 
@@ -752,6 +875,22 @@ func _setup_audio_manager() -> void:
 
 	if not loaded:
 		push_warning("MainUI: case audio clue data could not be loaded.")
+
+
+func _setup_tutorial_assets() -> void:
+	ui_sound_manager = get_node_or_null("/root/UISoundManager")
+	cursor_manager = get_node_or_null("/root/CursorManager")
+
+	if not _is_tutorial_case():
+		return
+
+	if cursor_manager != null:
+		cursor_manager.call("activate_tutorial")
+	else:
+		push_warning("MainUI: CursorManager autoload is unavailable.")
+
+	if ui_sound_manager == null:
+		push_warning("MainUI: UISoundManager autoload is unavailable.")
 
 
 func _build_right_panel() -> Control:
@@ -826,15 +965,11 @@ func _build_right_panel() -> Control:
 	current_node_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	body_margin.add_child(current_node_body)
 
-	box.add_child(_section_title("相关线索"))
+	box.add_child(_section_title("操作说明"))
 
 	clue_list = VBoxContainer.new()
 	clue_list.add_theme_constant_override("separation", 8)
 	box.add_child(clue_list)
-
-	var all := _label("查看全部线索 →", 14, C_BLUE, FONT_SERIF_REGULAR)
-	all.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	box.add_child(all)
 
 	box.add_child(_right_divider())
 	box.add_child(_section_title("关联节点"))
@@ -871,7 +1006,6 @@ func _initialize_case_for_startup() -> bool:
 			return _enter_with_loaded_runtime(_startup_runtime_data)
 		"new_game":
 			runtime_state.reset_runtime_state()
-			_node_history.clear()
 			_suppress_disk_autosave = false
 			_show_node(initial_node_id)
 			return runtime_state.current_node_id == initial_node_id
@@ -879,7 +1013,6 @@ func _initialize_case_for_startup() -> bool:
 			# Running MainUI.tscn directly remains useful for development, but it
 			# must not overwrite the player's disk autosave.
 			runtime_state.reset_runtime_state()
-			_node_history.clear()
 			_suppress_disk_autosave = true
 			_show_node(initial_node_id)
 			return runtime_state.current_node_id == initial_node_id
@@ -902,9 +1035,11 @@ func _enter_with_loaded_runtime(runtime_data: Dictionary) -> bool:
 		_initialization_error = "应用存档运行状态失败"
 		return false
 
-	_node_history.clear()
+	_normalize_tutorial_investigation_flags()
+	_prepare_graph_view_from_runtime()
 	_stop_audio_for_context_change()
 	_render_node(loaded_node_data)
+	call_deferred("_apply_saved_graph_view")
 	story_scroll.scroll_vertical = 0
 	story_view.visible = true
 	graph_view.visible = false
@@ -930,7 +1065,11 @@ func _show_node(node_id: String) -> void:
 		push_warning("MainUI: node not found: " + node_id)
 		return
 
-	_record_current_node_for_history(node_id)
+	var source_node_id := runtime_state.current_node_id
+	if runtime_state.visit_history.is_empty():
+		runtime_state.initialize_visit_history(node_id)
+	elif source_node_id != "" and source_node_id != node_id:
+		runtime_state.commit_transition(source_node_id, node_id)
 	_stop_audio_for_context_change()
 	_apply_node_flags(node_data)
 	var autosave: bool = bool(node_data.get("autosave", false))
@@ -969,12 +1108,13 @@ func _render_node(node_data: Dictionary) -> void:
 	_set_framed_label_text(node_type_label, str(node_data.get("node_type", "事件节点")))
 	story_title_label.text = str(node_data.get("title", ""))
 
+	_render_tutorial_hints(node_data)
 	_render_audio_cards(node_data)
 	_render_image_cards(node_data)
 	_render_story_body(node_data)
 	_render_choices(node_data)
-	_render_right_panel(node_data)
 	_render_graph_view()
+	_render_right_panel(node_data)
 	_update_backtrack_button_state()
 
 	call_deferred("_apply_scrollbar_styles")
@@ -988,6 +1128,122 @@ func _refresh_current_goal() -> void:
 
 	if not current_data.is_empty():
 		target_text_label.text = _current_goal_for_node(current_data)
+		_render_tutorial_hints(current_data)
+
+
+func _render_tutorial_hints(node_data: Dictionary) -> void:
+	if not _is_tutorial_case():
+		return
+
+	var node_id: String = str(node_data.get("node_id", ""))
+
+	match node_id:
+		"tutorial_0000":
+			_queue_tutorial_modal_once("audio_controls", [
+				{"prompt": "mouse_left", "text": "鼠标左键：播放这段音频"},
+				{"prompt": "mouse_drag", "text": "按住鼠标左键：拖动播放线调整位置"}
+			])
+		"tutorial_0003":
+			_queue_tutorial_modal_once("backtrack", [
+				{"prompt": "mouse_left", "text": "鼠标左键：点击顶部“回溯”返回上一条记录"}
+			])
+		"tutorial_0006":
+			if not bool(runtime_state.flags.get("tutorial_first_keyword_clicked", false)):
+				_queue_tutorial_modal_once("keyword_extract", [
+					{"prompt": "mouse_left", "text": "鼠标左键：点击正文中的下划线关键词"}
+				])
+			elif not bool(runtime_state.flags.get("tutorial_keyword_intro_viewed", false)):
+				_queue_tutorial_modal_once("keyword_intro", [
+					{"prompt": "mouse_left", "text": "鼠标左键：再次点击关键词查看简介"}
+				])
+			else:
+				_queue_tutorial_modal_once("open_graph", [
+					{"prompt": "mouse_left", "text": "鼠标左键：点击顶部“图谱”建立连接"}
+				])
+		"tutorial_0007":
+			_queue_tutorial_modal_once("graph_and_delete", [
+				{"prompt": "mouse_left", "text": "鼠标左键：点击顶部“图谱”继续建立连接"},
+				{"prompt": "mouse_right", "text": "鼠标右键：删除左侧未固定的关键词"}
+			])
+
+
+func _queue_tutorial_modal_once(hint_key: String, prompts: Array[Dictionary]) -> void:
+	if not _is_tutorial_case() or runtime_state == null or prompts.is_empty():
+		return
+
+	var flag_name := "tutorial_hint_seen_" + hint_key
+
+	if bool(runtime_state.flags.get(flag_name, false)):
+		return
+
+	runtime_state.flags[flag_name] = true
+	_tutorial_modal_queue.append({
+		"hint_key": hint_key,
+		"prompts": prompts.duplicate(true)
+	})
+
+	if not _tutorial_modal_show_scheduled:
+		_tutorial_modal_show_scheduled = true
+		call_deferred("_show_next_tutorial_modal")
+
+
+func _show_next_tutorial_modal() -> void:
+	_tutorial_modal_show_scheduled = false
+
+	if tutorial_modal != null and is_instance_valid(tutorial_modal):
+		return
+
+	if _tutorial_modal_queue.is_empty() or not _is_tutorial_case():
+		return
+
+	var request: Dictionary = _tutorial_modal_queue.pop_front()
+	tutorial_modal = TutorialModalScript.new() as Control
+	tutorial_modal.call("configure", request.get("prompts", []))
+	tutorial_modal.connect("dismissed", _on_tutorial_modal_dismissed)
+	add_child(tutorial_modal)
+
+
+func _on_tutorial_modal_dismissed() -> void:
+	tutorial_modal = null
+	if _save_error_modal_active:
+		_save_error_modal_active = false
+		return
+	if _failure_hint_modal_active:
+		_failure_hint_modal_active = false
+		_graph_has_fit = false
+		_show_graph_view()
+		call_deferred("_fit_graph_to_view")
+		return
+
+	if not _tutorial_modal_queue.is_empty():
+		_tutorial_modal_show_scheduled = true
+		call_deferred("_show_next_tutorial_modal")
+
+
+func _show_failure_hint(hint_text: String) -> void:
+	if hint_text == "" or (tutorial_modal != null and is_instance_valid(tutorial_modal)):
+		return
+	_failure_hint_modal_active = true
+	runtime_state.flags["failure_hint_seen_" + runtime_state.current_node_id] = true
+	tutorial_modal = TutorialModalScript.new() as Control
+	tutorial_modal.call("configure_message", "调查提示", hint_text)
+	tutorial_modal.connect("dismissed", _on_tutorial_modal_dismissed)
+	add_child(tutorial_modal)
+
+
+func _show_save_error_modal() -> void:
+	if tutorial_modal != null and is_instance_valid(tutorial_modal):
+		return
+	_save_error_modal_active = true
+	tutorial_modal = TutorialModalScript.new() as Control
+	tutorial_modal.call(
+		"configure_message",
+		"存档写入失败",
+		"存档未能写入所选槽位。\n\n本次进度没有被保存。请关闭提示后重试。",
+		"点击空白处继续"
+	)
+	tutorial_modal.connect("dismissed", _on_tutorial_modal_dismissed)
+	add_child(tutorial_modal)
 
 
 func _current_goal_for_node(node_data: Dictionary) -> String:
@@ -1012,34 +1268,47 @@ func _current_goal_for_node(node_data: Dictionary) -> String:
 				else configured_goal
 			)
 		"tutorial_0006":
-			if not runtime_state.has_keyword("封口白痕", "tutorial_0006"):
+			if not runtime_state.has_keyword("页码缺口", "tutorial_0006"):
 				return configured_goal
 
 			if not bool(runtime_state.flags.get("tutorial_keyword_intro_viewed", false)):
-				return "查看关键词“封口白痕”的简介。"
+				return "查看关键词“页码缺口”的简介。"
 
 			if not bool(runtime_state.flags.get("tutorial_graph_opened", false)):
 				return "打开顶部的“图谱”。"
 
 			if not bool(runtime_state.flags.get("tutorial_first_keyword_selected", false)):
-				return "选择关键词“封口白痕”。"
+				return "选择关键词“页码缺口”。"
+
+			if not bool(runtime_state.flags.get("tutorial_page_connection_completed", false)):
+				return "将“页码缺口”连接到“文件数量发生变化”。"
+
+			return "查看新解锁的调查节点。"
+		"tutorial_0007":
+			if not runtime_state.has_keyword("T-00编号", "tutorial_0007"):
+				return "提取关键词“T-00编号”。"
+
+			if not bool(runtime_state.flags.get("tutorial_invalid_connection_seen", false)):
+				return "将“T-00编号”连接到“文件数量发生变化”。"
+
+			if not bool(runtime_state.flags.get("tutorial_returned_safe", false)):
+				return "尝试判断是谁取走了缺失文件。"
+
+			if (
+				bool(runtime_state.flags.get("tutorial_seal_evidence_found", false))
+				and not bool(runtime_state.flags.get("tutorial_seal_connection_completed", false))
+			):
+				return "复核封口异常，或直接形成保留意见结论。"
+
+			return "选择与现有证据相符的复核结论。"
+		"tutorial_0007s":
+			if not runtime_state.has_keyword("封口白痕", "tutorial_0007s"):
+				return configured_goal
 
 			if not bool(runtime_state.flags.get("tutorial_seal_connection_completed", false)):
 				return "将“封口白痕”连接到“封口状态异常”。"
 
-			return "查看新解锁的调查节点。"
-		"tutorial_0007":
-			if bool(runtime_state.flags.get("tutorial_page_connection_completed", false)):
-				return "查看复核结果。"
-
-			if bool(runtime_state.flags.get("tutorial_returned_safe", false)):
-				return "比较当前页码与封存时的文件数量。"
-
-			if bool(runtime_state.flags.get("tutorial_invalid_connection_seen", false)):
-				return "尝试判断是谁取走了缺失文件。"
-
-			if runtime_state.has_keyword("T-00编号", "tutorial_0007"):
-				return "选择关键词“T-00编号”。"
+			return "返回“推理复核”形成完整结论。"
 
 	return configured_goal
 
@@ -1219,7 +1488,7 @@ func _on_story_keyword_meta_clicked(meta_value: Variant) -> void:
 		if (
 			_is_tutorial_case()
 			and source_node_id == "tutorial_0006"
-			and keyword == "封口白痕"
+			and keyword == "页码缺口"
 		):
 			_mark_tutorial_flag("tutorial_keyword_intro_viewed", "关键词简介已查看。")
 
@@ -1246,11 +1515,12 @@ func _on_story_keyword_meta_clicked(meta_value: Variant) -> void:
 		_render_story_body(current_node_data)
 
 	_show_keyword_popup(keyword, false, popup_position)
+	_play_tutorial_ui_sound("ui_keyword_extract")
 
 	if (
 		_is_tutorial_case()
 		and source_node_id == "tutorial_0006"
-		and keyword == "封口白痕"
+		and keyword == "页码缺口"
 	):
 		_mark_tutorial_flag(
 			"tutorial_first_keyword_clicked",
@@ -1476,9 +1746,34 @@ func _render_choices(node_data: Dictionary) -> void:
 
 	var choices: Variant = node_data.get("choices", [])
 	choice_title_label.visible = false
+	if runtime_state.is_reviewing_history():
+		var transition := runtime_state.get_committed_transition_at(runtime_state.history_cursor)
+		if not transition.is_empty():
+			var committed_choice: Dictionary = {}
+			if choices is Array:
+				for choice_value in choices:
+					if choice_value is Dictionary and _get_choice_target_node_id(choice_value) == str(transition.get("target_node_id", "")):
+						committed_choice = (choice_value as Dictionary).duplicate(true)
+						break
+			if committed_choice.is_empty():
+				var target_data := loader.get_node(str(transition.get("target_node_id", "")))
+				committed_choice = {
+					"title": "继续查看已选择路径",
+					"description": str(target_data.get("title", "下一条记录")),
+					"to": str(transition.get("target_node_id", ""))
+				}
+			committed_choice["_history_review"] = true
+			choice_title_label.visible = true
+			choice_list.add_child(_choice_button(
+				_icon_by_name(_choice_icon_name(committed_choice)),
+				str(committed_choice.get("title", "已选择")),
+				_choice_description(committed_choice),
+				committed_choice
+			))
+		return
 
 	if not (choices is Array):
-		return
+		choices = []
 
 	for choice in choices:
 		if not (choice is Dictionary):
@@ -1500,31 +1795,36 @@ func _render_choices(node_data: Dictionary) -> void:
 			choice
 		))
 
+	if bool(node_data.get("is_failure_ending", false)) and str(node_data.get("failure_hint", "")) != "":
+		choice_title_label.visible = true
+		var hint_choice := {
+			"title": "查看调查提示",
+			"description": "回看已走过的证据路径，寻找尚未闭合的环节",
+			"_failure_hint": true,
+			"_failure_hint_text": str(node_data.get("failure_hint", ""))
+		}
+		choice_list.add_child(_choice_button(ICON_LIGHTBULB, hint_choice.title, hint_choice.description, hint_choice))
+
 
 func _render_right_panel(node_data: Dictionary) -> void:
 	current_node_title.text = str(node_data.get("title", ""))
 	current_node_body.text = _node_summary(node_data)
 
 	_clear_children(clue_list)
-	_add_clue_ids(node_data.get("text_clues", []), "TXT", ICON_BOOK_OPEN)
-	_add_clue_ids(node_data.get("audio_clues", []), "AUD", ICON_ARCHIVE)
-
-	for image_item in _collect_image_items(node_data):
-		if not (image_item is Dictionary):
-			continue
-
-		clue_list.add_child(_clue_item(
-			ICON_RECTANGLE_HORIZONTAL,
-			str(image_item.get("title", "图像线索")),
-			"IMG · %s" % str(image_item.get("id", "未编号"))
-		))
-
-	if clue_list.get_child_count() == 0:
-		clue_list.add_child(_clue_item(
-			ICON_SEARCH,
-			"暂无关联线索",
-			"当前节点没有登记线索"
-		))
+	if graph_view != null and graph_view.visible:
+		clue_list.add_child(_clue_item(ICON_SEARCH, "浏览图谱", "拖动空白处平移 · 滚轮围绕指针缩放"))
+		clue_list.add_child(_clue_item(ICON_BOOK_OPEN, "回看记录", "点击已访问节点 · Tab 返回剧情"))
+	else:
+		clue_list.add_child(_clue_item(ICON_BOOK_OPEN, "调查选择", "↑ / ↓ 选择 · Enter 确认 · Tab 查看图谱"))
+		clue_list.add_child(_clue_item(ICON_SEARCH, "正文交互", "鼠标左键选择选项或提取关键词"))
+		for keyword_instance in runtime_state.get_keyword_instances():
+			if not runtime_state.is_keyword_instance_connected(str(keyword_instance.get("instance_id", ""))):
+				clue_list.add_child(_clue_item(ICON_KEY_ROUND, "关键词整理", "鼠标右键删除未固定关键词"))
+				break
+		if _first_array_value(node_data.get("audio_clues", []), "") != "":
+			clue_list.add_child(_clue_item(ICON_PLAY, "音频复核", "Space 播放/暂停 · 拖动波形实时擦洗"))
+		if runtime_state.is_reviewing_history():
+			clue_list.add_child(_clue_item(ICON_REFRESH_CW, "路径回看", "灰色选项只沿已提交路径前进，不会重做选择"))
 
 	_clear_children(graph_slot)
 	graph_slot.add_child(_mini_graph(_build_graph_data(node_data)))
@@ -1548,74 +1848,49 @@ func _render_graph_view() -> void:
 
 	_clear_children(graph_canvas)
 	_keyword_graph_layout.clear()
-
-	var canvas_size: Vector2 = loader.get_graph_canvas_size()
-
-	if canvas_size.x <= 0.0 or canvas_size.y <= 0.0:
-		var empty_edges: Array[Dictionary] = []
-		graph_canvas.configure(Vector2(960.0, 640.0), empty_edges, C_LINE)
-		var warning_label := _label("图谱布局不可用", 18, C_SUBTEXT, FONT_SERIF_REGULAR)
-		warning_label.position = Vector2(32.0, 32.0)
-		graph_canvas.add_child(warning_label)
-		return
-
+	_graph_node_positions.clear()
+	_graph_node_sizes.clear()
+	_graph_node_depths.clear()
 	var visible_nodes: Dictionary = _get_visible_graph_nodes()
-	var edges: Array[Dictionary] = []
 
-	for source_value in visible_nodes.keys():
-		var source_id: String = str(source_value)
+	for node_id_value in visible_nodes.keys():
+		var node_id: String = str(node_id_value)
+		var node_data: Dictionary = loader.get_node(node_id)
 
-		if not runtime_state.unlocked_nodes.has(source_id):
-			continue
+		if not node_data.is_empty():
+			_graph_node_sizes[node_id] = _graph_node_size_for(node_data)
 
-		var source_data: Dictionary = loader.get_node(source_id)
-		var source_position: Vector2 = loader.get_graph_node_position(source_id)
-
-		if source_data.is_empty() or source_position.x < 0.0 or source_position.y < 0.0:
-			continue
-
-		var choices: Variant = source_data.get("choices", [])
-
-		if not (choices is Array):
-			continue
-
-		for choice in choices:
-			if not (choice is Dictionary):
-				continue
-
-			if not _choice_is_available(choice):
-				continue
-
-			var target_id: String = str(choice.get("to", ""))
-
-			if target_id == "" or not visible_nodes.has(target_id):
-				continue
-
-			var target_position: Vector2 = loader.get_graph_node_position(target_id)
-
-			if target_position.x < 0.0 or target_position.y < 0.0:
-				continue
-
-			edges.append({
-				"from": source_position + GRAPH_NODE_SIZE * 0.5,
-				"to": target_position + GRAPH_NODE_SIZE * 0.5
-			})
-
+	var graph_layout_result: Dictionary = NarrativeGraphLayoutScript.calculate(
+		loader.get_nodes(),
+		visible_nodes,
+		loader.get_initial_node_id(),
+		_graph_node_sizes
+	)
+	_graph_node_positions = (graph_layout_result.get("positions", {}) as Dictionary).duplicate(true)
+	_graph_node_sizes = (graph_layout_result.get("sizes", {}) as Dictionary).duplicate(true)
+	_graph_node_depths = (graph_layout_result.get("depths", {}) as Dictionary).duplicate(true)
+	var canvas_size: Vector2 = graph_layout_result.get("canvas_size", Vector2(1080.0, 720.0))
 	_keyword_graph_layout = _calculate_keyword_graph_layout(visible_nodes, canvas_size)
-	var keyword_edges: Array[Dictionary] = _build_keyword_connection_edges(visible_nodes)
-	graph_canvas.configure(canvas_size, edges, C_LINE, keyword_edges, C_BLUE)
+	var edges: Array[Dictionary] = _build_narrative_graph_edges(visible_nodes)
+	edges.append_array(_build_keyword_origin_edges())
+	edges.append_array(_build_keyword_connection_edges(visible_nodes))
+	edges.append_array(_build_keyword_candidate_edges(visible_nodes))
+	graph_canvas.configure(canvas_size, edges)
+	_graph_canvas_size = canvas_size
+	graph_zoom_container.custom_minimum_size = canvas_size * _graph_zoom
+	graph_zoom_container.size = canvas_size * _graph_zoom
+	graph_canvas.scale = Vector2.ONE * _graph_zoom
 
 	for node_value in visible_nodes.keys():
 		var node_id: String = str(node_value)
 		var node_data: Dictionary = loader.get_node(node_id)
-		var node_position: Vector2 = loader.get_graph_node_position(node_id)
 
 		if node_data.is_empty():
 			push_warning("MainUI: graph references missing node: " + node_id)
 			continue
 
-		if node_position.x < 0.0 or node_position.y < 0.0:
-			push_warning("MainUI: graph layout position missing for node: " + node_id)
+		if not _graph_node_positions.has(node_id) or not _graph_node_sizes.has(node_id):
+			push_warning("MainUI: graph hierarchy omitted visible node: " + node_id)
 			continue
 
 		var visited: bool = runtime_state.unlocked_nodes.has(node_id)
@@ -1623,7 +1898,8 @@ func _render_graph_view() -> void:
 		var keyword_unlocked: bool = runtime_state.is_keyword_unlocked(node_id)
 		graph_canvas.add_child(_graph_node_card(
 			node_data,
-			node_position,
+			_graph_node_positions[node_id],
+			_graph_node_sizes[node_id],
 			visited,
 			current,
 			keyword_unlocked
@@ -1633,11 +1909,11 @@ func _render_graph_view() -> void:
 		if not (layout_value is Dictionary):
 			continue
 
-		var layout: Dictionary = layout_value
+		var keyword_layout: Dictionary = layout_value
 		graph_canvas.add_child(_keyword_graph_node(
-			layout.get("instance", {}),
-			layout.get("position", Vector2.ZERO),
-			layout.get("size", KEYWORD_GRAPH_MIN_SIZE)
+			keyword_layout.get("instance", {}),
+			keyword_layout.get("position", Vector2.ZERO),
+			keyword_layout.get("size", KEYWORD_GRAPH_MIN_SIZE)
 		))
 
 
@@ -1657,30 +1933,17 @@ func _get_visible_graph_nodes() -> Dictionary:
 		if connected_target_id != "" and not loader.get_node(connected_target_id).is_empty():
 			visible_nodes[connected_target_id] = true
 
-	var current_data: Dictionary = loader.get_node(runtime_state.current_node_id)
-	var choices: Variant = current_data.get("choices", [])
-
-	if choices is Array:
-		for choice in choices:
-			if not (choice is Dictionary):
-				continue
-
-			if not _choice_is_available(choice):
-				continue
-
-			var target_id: String = str(choice.get("to", ""))
-
-			if target_id != "" and not loader.get_node(target_id).is_empty():
-				visible_nodes[target_id] = true
-
-	var graph_targets: Variant = current_data.get("graph_targets", [])
-
-	if graph_targets is Array:
-		for graph_target_value in graph_targets:
-			var graph_target_id: String = str(graph_target_value)
-
-			if graph_target_id != "" and not loader.get_node(graph_target_id).is_empty():
-				visible_nodes[graph_target_id] = true
+	# Connection candidates are ephemeral interaction targets. They appear only
+	# while the player is actively linking a keyword and never become path nodes
+	# until the rule commits/unlocks them.
+	if _selected_keyword_instance_id != "":
+		var current_data := loader.get_node(runtime_state.current_node_id)
+		var graph_targets: Variant = current_data.get("graph_targets", [])
+		if graph_targets is Array:
+			for target_value in graph_targets:
+				var target_id := str(target_value)
+				if target_id != "" and not loader.get_node(target_id).is_empty():
+					visible_nodes[target_id] = true
 
 	return visible_nodes
 
@@ -1690,43 +1953,120 @@ func _calculate_keyword_graph_layout(
 	canvas_size: Vector2
 ) -> Dictionary:
 	var layout_by_instance: Dictionary = {}
-	var source_keyword_counts: Dictionary = {}
+	var instances_by_source: Dictionary = {}
 
 	for keyword_instance in runtime_state.get_keyword_instances():
 		var source_node_id: String = str(keyword_instance.get("source_node_id", ""))
 		var instance_id: String = str(keyword_instance.get("instance_id", ""))
 
-		if source_node_id == "" or instance_id == "" or not visible_nodes.has(source_node_id):
+		if (
+			source_node_id == ""
+			or instance_id == ""
+			or not visible_nodes.has(source_node_id)
+			or not _graph_node_positions.has(source_node_id)
+		):
 			continue
 
-		var source_position: Vector2 = loader.get_graph_node_position(source_node_id)
+		if not instances_by_source.has(source_node_id):
+			instances_by_source[source_node_id] = []
 
-		if source_position.x < 0.0 or source_position.y < 0.0:
-			continue
+		(instances_by_source[source_node_id] as Array).append(keyword_instance)
 
-		var keyword_index: int = int(source_keyword_counts.get(source_node_id, 0))
-		source_keyword_counts[source_node_id] = keyword_index + 1
-		var keyword_text: String = str(keyword_instance.get("text", ""))
-		var keyword_size := Vector2(
-			clampf(74.0 + float(keyword_text.length()) * 14.0, KEYWORD_GRAPH_MIN_SIZE.x, KEYWORD_GRAPH_MAX_WIDTH),
-			KEYWORD_GRAPH_MIN_SIZE.y
-		)
-		var keyword_position := Vector2(
-			source_position.x + GRAPH_NODE_SIZE.x + KEYWORD_GRAPH_OFFSET,
-			source_position.y + 8.0 + float(keyword_index) * (keyword_size.y + KEYWORD_GRAPH_GAP)
-		)
+	for source_node_id_value in instances_by_source.keys():
+		var source_node_id: String = str(source_node_id_value)
+		var source_position: Vector2 = _graph_node_positions[source_node_id]
+		var source_size: Vector2 = _graph_node_sizes.get(source_node_id, GRAPH_NODE_SIZE)
+		var instances: Array = instances_by_source[source_node_id]
+		var keyword_sizes: Array[Vector2] = []
+		var total_width := 0.0
 
-		if keyword_position.x + keyword_size.x > canvas_size.x - 16.0:
-			keyword_position.x = source_position.x - KEYWORD_GRAPH_OFFSET - keyword_size.x
+		for keyword_instance in instances:
+			var keyword_text: String = str((keyword_instance as Dictionary).get("text", ""))
+			var keyword_size := Vector2(
+				clampf(74.0 + float(keyword_text.length()) * 14.0, KEYWORD_GRAPH_MIN_SIZE.x, KEYWORD_GRAPH_MAX_WIDTH),
+				KEYWORD_GRAPH_MIN_SIZE.y
+			)
+			keyword_sizes.append(keyword_size)
+			total_width += keyword_size.x
 
-		keyword_position.x = maxf(16.0, keyword_position.x)
-		layout_by_instance[instance_id] = {
-			"instance": keyword_instance,
-			"position": keyword_position,
-			"size": keyword_size
-		}
+		if instances.size() > 1:
+			total_width += KEYWORD_GRAPH_GAP * float(instances.size() - 1)
+
+		var keyword_x := source_position.x + (source_size.x - total_width) * 0.5
+		keyword_x = clampf(keyword_x, 16.0, maxf(16.0, canvas_size.x - total_width - 16.0))
+		var keyword_y := source_position.y + source_size.y + 18.0
+
+		for index in range(instances.size()):
+			var keyword_instance: Dictionary = instances[index]
+			var keyword_size: Vector2 = keyword_sizes[index]
+			var instance_id: String = str(keyword_instance.get("instance_id", ""))
+			layout_by_instance[instance_id] = {
+				"instance": keyword_instance,
+				"position": Vector2(keyword_x, keyword_y),
+				"size": keyword_size
+			}
+			keyword_x += keyword_size.x + KEYWORD_GRAPH_GAP
 
 	return layout_by_instance
+
+
+func _build_narrative_graph_edges(visible_nodes: Dictionary) -> Array[Dictionary]:
+	var edges: Array[Dictionary] = []
+	var added_pairs: Dictionary = {}
+	for transition in runtime_state.committed_transitions:
+		var source_id := str(transition.get("source_node_id", ""))
+		var target_id := str(transition.get("target_node_id", ""))
+		var history_index := int(transition.get("history_index", -1))
+		if not visible_nodes.has(source_id) or not visible_nodes.has(target_id):
+			continue
+		if not _graph_node_positions.has(source_id) or not _graph_node_positions.has(target_id):
+			continue
+		var pair_key := source_id + "->" + target_id
+		var style := _graph_edge_style(source_id, target_id, history_index)
+		if added_pairs.has(pair_key):
+			var prior_active := bool(added_pairs[pair_key])
+			var current_active: bool = not bool(style.get("dashed", false)) and style.get("color", C_MUTED) == C_BLUE
+			if not current_active or prior_active:
+				continue
+			for edge_index in range(edges.size()):
+				if str(edges[edge_index].get("source_id", "")) == source_id and str(edges[edge_index].get("target_id", "")) == target_id:
+					edges.remove_at(edge_index)
+					break
+		added_pairs[pair_key] = not bool(style.get("dashed", false)) and style.get("color", C_MUTED) == C_BLUE
+		edges.append(_make_graph_edge(
+			source_id, target_id,
+			_graph_node_positions[source_id], _graph_node_sizes[source_id],
+			_graph_node_positions[target_id], _graph_node_sizes[target_id], style
+		))
+
+	return edges
+
+
+func _build_keyword_origin_edges() -> Array[Dictionary]:
+	var edges: Array[Dictionary] = []
+
+	for layout_value in _keyword_graph_layout.values():
+		if not (layout_value is Dictionary):
+			continue
+
+		var layout: Dictionary = layout_value
+		var instance: Dictionary = layout.get("instance", {})
+		var source_id: String = str(instance.get("source_node_id", ""))
+
+		if not _graph_node_positions.has(source_id) or not _graph_node_sizes.has(source_id):
+			continue
+
+		edges.append(_make_graph_edge(
+			source_id,
+			str(instance.get("instance_id", "")),
+			_graph_node_positions[source_id],
+			_graph_node_sizes[source_id],
+			layout.get("position", Vector2.ZERO),
+			layout.get("size", KEYWORD_GRAPH_MIN_SIZE),
+			{"color": C_BLUE, "width": 1.0, "dashed": false}
+		))
+
+	return edges
 
 
 func _build_keyword_connection_edges(visible_nodes: Dictionary) -> Array[Dictionary]:
@@ -1747,20 +2087,162 @@ func _build_keyword_connection_edges(visible_nodes: Dictionary) -> Array[Diction
 		if not (layout_value is Dictionary):
 			continue
 
-		var target_position: Vector2 = loader.get_graph_node_position(target_node_id)
-
-		if target_position.x < 0.0 or target_position.y < 0.0:
+		if not _graph_node_positions.has(target_node_id) or not _graph_node_sizes.has(target_node_id):
 			continue
 
 		var layout: Dictionary = layout_value
 		var keyword_position: Vector2 = layout.get("position", Vector2.ZERO)
 		var keyword_size: Vector2 = layout.get("size", KEYWORD_GRAPH_MIN_SIZE)
-		edges.append({
-			"from": keyword_position + keyword_size * 0.5,
-			"to": target_position + GRAPH_NODE_SIZE * 0.5
-		})
+		edges.append(_make_graph_edge(
+			instance_id,
+			target_node_id,
+			keyword_position,
+			keyword_size,
+			_graph_node_positions[target_node_id],
+			_graph_node_sizes[target_node_id],
+			{"color": C_BLUE, "width": 2.0, "dashed": false}
+		))
 
 	return edges
+
+
+func _build_keyword_candidate_edges(visible_nodes: Dictionary) -> Array[Dictionary]:
+	var edges: Array[Dictionary] = []
+
+	if _selected_keyword_instance_id == "" or not _keyword_graph_layout.has(_selected_keyword_instance_id):
+		return edges
+
+	var instance: Dictionary = runtime_state.get_keyword_instance(_selected_keyword_instance_id)
+
+	if instance.is_empty():
+		return edges
+
+	var existing_targets: Dictionary = {}
+
+	for connection in runtime_state.get_keyword_connections_for_keyword(_selected_keyword_instance_id):
+		existing_targets[str(connection.get("target_node_id", ""))] = true
+
+	var keyword_layout: Dictionary = _keyword_graph_layout[_selected_keyword_instance_id]
+	var keyword_position: Vector2 = keyword_layout.get("position", Vector2.ZERO)
+	var keyword_size: Vector2 = keyword_layout.get("size", KEYWORD_GRAPH_MIN_SIZE)
+
+	for target_id_value in visible_nodes.keys():
+		var target_id: String = str(target_id_value)
+
+		if (
+			existing_targets.has(target_id)
+			or not _graph_node_positions.has(target_id)
+			or not _graph_node_sizes.has(target_id)
+		):
+			continue
+
+		var rule: Dictionary = loader.find_keyword_rule(
+			str(instance.get("normalized_text", "")),
+			str(instance.get("source_node_id", "")),
+			target_id
+		)
+
+		if rule.is_empty():
+			continue
+
+		var outcome := str(rule.get("outcome", "")).to_lower()
+		var candidate_color := C_WARNING if outcome in ["error", "incorrect", "wrong"] else C_MUTED
+
+		edges.append(_make_graph_edge(
+			_selected_keyword_instance_id,
+			target_id,
+			keyword_position,
+			keyword_size,
+			_graph_node_positions[target_id],
+			_graph_node_sizes[target_id],
+			{"color": candidate_color, "width": 1.0, "dashed": true}
+		))
+
+	return edges
+
+
+func _graph_node_size_for(node_data: Dictionary) -> Vector2:
+	var node_type := str(node_data.get("node_type", ""))
+
+	if (
+		bool(node_data.get("graph_only", false))
+		or node_type.contains("推断")
+		or node_type.contains("结论")
+	):
+		return GRAPH_INFERENCE_NODE_SIZE
+
+	return GRAPH_NODE_SIZE
+
+
+func _graph_edge_style(source_id: String, target_id: String, history_index: int = -1) -> Dictionary:
+	var target_data: Dictionary = loader.get_node(target_id)
+	var icon_key := str(target_data.get("icon_key", ""))
+	var node_type := str(target_data.get("node_type", ""))
+	var is_error := icon_key in ["false", "fatal"] or node_type.contains("错误") or node_type.contains("失败")
+	if is_error:
+		return {"color": C_WARNING, "width": 1.0, "dashed": true}
+	if history_index >= _current_path_start_index() and history_index < runtime_state.history_cursor:
+		return {"color": C_BLUE, "width": 2.0, "dashed": false}
+	return {"color": C_MUTED, "width": 1.0, "dashed": true}
+
+
+func _current_path_start_index() -> int:
+	for index in range(runtime_state.history_cursor - 1, -1, -1):
+		var node_data := loader.get_node(runtime_state.visit_history[index])
+		var choices: Variant = node_data.get("choices", [])
+		if choices is Array and (choices as Array).size() > 1:
+			return index
+	return 0
+
+
+func _make_graph_edge(
+	source_id: String,
+	target_id: String,
+	source_position: Vector2,
+	source_size: Vector2,
+	target_position: Vector2,
+	target_size: Vector2,
+	style: Dictionary
+) -> Dictionary:
+	var source_rect := Rect2(source_position, source_size)
+	var target_rect := Rect2(target_position, target_size)
+	var curve := PackedVector2Array()
+	var source_center := source_rect.get_center()
+	var target_center := target_rect.get_center()
+
+	if target_rect.position.y >= source_rect.end.y + 8.0:
+		var start := Vector2(source_center.x, source_rect.end.y)
+		var finish := Vector2(target_center.x, target_rect.position.y)
+		var handle := clampf(absf(finish.y - start.y) * 0.48, 42.0, 170.0)
+		curve = PackedVector2Array([start, start + Vector2(0.0, handle), finish - Vector2(0.0, handle), finish])
+	elif target_rect.end.x <= source_rect.position.x or target_rect.position.x >= source_rect.end.x:
+		var target_on_right := target_center.x > source_center.x
+		var start_x := source_rect.end.x if target_on_right else source_rect.position.x
+		var finish_x := target_rect.position.x if target_on_right else target_rect.end.x
+		var start := Vector2(start_x, source_center.y)
+		var finish := Vector2(finish_x, target_center.y)
+		var handle := clampf(absf(finish_x - start_x) * 0.48, 42.0, 170.0)
+		var direction := 1.0 if target_on_right else -1.0
+		curve = PackedVector2Array([start, start + Vector2(handle * direction, 0.0), finish - Vector2(handle * direction, 0.0), finish])
+	else:
+		var route_left := minf(source_rect.position.x, target_rect.position.x) - 28.0
+		var use_left := route_left >= 12.0
+		var route_x := route_left if use_left else maxf(source_rect.end.x, target_rect.end.x) + 28.0
+		var start_x := source_rect.position.x if use_left else source_rect.end.x
+		var finish_x := target_rect.position.x if use_left else target_rect.end.x
+		var start := Vector2(start_x, source_center.y)
+		var finish := Vector2(finish_x, target_center.y)
+		curve = PackedVector2Array([start, Vector2(route_x, start.y), Vector2(route_x, finish.y), finish])
+
+	return {
+		"source_id": source_id,
+		"target_id": target_id,
+		"curve": curve,
+		"color": style.get("color", C_LINE),
+		"width": float(style.get("width", 1.0)),
+		"dashed": bool(style.get("dashed", false)),
+		"arrow_size": 7.0
+	}
 
 
 func _keyword_graph_node(keyword_instance: Dictionary, position_value: Vector2, node_size: Vector2) -> Control:
@@ -1800,10 +2282,17 @@ func _keyword_graph_node(keyword_instance: Dictionary, position_value: Vector2, 
 	row.add_theme_constant_override("separation", 6)
 	margin.add_child(row)
 
-	var diamond := _label("◇", 15, text_color, FONT_MONO_MEDIUM)
-	diamond.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	diamond.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	row.add_child(diamond)
+	if _is_tutorial_case():
+		row.add_child(_icon(
+			_tutorial_icon("keyword", ICON_KEY_ROUND),
+			Vector2(17, 17),
+			text_color
+		))
+	else:
+		var diamond := _label("◇", 15, text_color, FONT_MONO_MEDIUM)
+		diamond.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		diamond.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		row.add_child(diamond)
 
 	if connected:
 		var connected_dot := _label("●", 9, text_color, FONT_MONO_MEDIUM)
@@ -1831,6 +2320,7 @@ func _keyword_graph_node(keyword_instance: Dictionary, position_value: Vector2, 
 func _graph_node_card(
 	node_data: Dictionary,
 	position_value: Vector2,
+	node_size: Vector2,
 	visited: bool,
 	current: bool,
 	keyword_unlocked: bool
@@ -1838,14 +2328,17 @@ func _graph_node_card(
 	var node_id: String = str(node_data.get("node_id", ""))
 	var icon_key: String = str(node_data.get("icon_key", ""))
 	var node_type: String = str(node_data.get("node_type", ""))
-	var is_error: bool = icon_key == "false" or node_type.contains("错误解释")
+	var is_error: bool = icon_key == "false" or node_type.contains("错误")
 	var is_failure: bool = icon_key == "fatal" or node_type.contains("失败")
-
-	var bg_color: Color = Color("#E8F0FF")
-	var border_color: Color = C_LINE
-	var text_color: Color = C_SUBTEXT
+	var is_final: bool = node_type.contains("最终") or node_type.contains("结论") or node_type.contains("教程完成")
+	var locked: bool = not visited and not keyword_unlocked and not current
+	var dashed_border: bool = locked or is_error or is_failure
+	var bg_color: Color = C_WHITE if locked else Color("#E8F0FF")
+	var border_color: Color = Color.TRANSPARENT if dashed_border else C_LINE
+	var dashed_color: Color = C_MUTED if locked else C_WARNING
+	var text_color: Color = C_MUTED if locked else C_SUBTEXT
 	var border_width: int = 1
-	var state_text := "可调查"
+	var state_text := "锁定" if locked else "可调查"
 
 	if visited:
 		bg_color = C_WHITE
@@ -1854,9 +2347,15 @@ func _graph_node_card(
 		state_text = "已访问"
 	elif keyword_unlocked:
 		bg_color = Color("#E8F0FF")
-		border_color = C_BLUE
+		border_color = C_LINE
 		text_color = C_BLUE
-		state_text = "已解锁"
+		state_text = "未访问 · 已解锁"
+
+	if is_final and not locked:
+		bg_color = C_BLUE_DARK
+		border_color = C_BLUE_DARK
+		text_color = C_WHITE
+		state_text = "最终结论"
 
 	if current:
 		bg_color = C_BLUE_DARK
@@ -1864,22 +2363,30 @@ func _graph_node_card(
 		text_color = C_WHITE
 		state_text = "当前节点"
 
-	if is_failure:
-		border_color = C_BLUE_DARK
-		border_width = 1
+	if is_error or is_failure:
+		border_color = Color.TRANSPARENT
+		dashed_color = C_WARNING
+		text_color = C_WARNING if not current else C_WHITE
 
 	var card := Control.new()
 	card.name = "GraphNode_" + node_id
 	card.set_meta("graph_node_card", true)
 	card.set_meta("graph_node_id", node_id)
 	card.position = position_value
-	card.size = GRAPH_NODE_SIZE
-	card.custom_minimum_size = GRAPH_NODE_SIZE
+	card.size = node_size
+	card.custom_minimum_size = node_size
 
 	var panel := PanelContainer.new()
-	panel.add_theme_stylebox_override("panel", _style_box(bg_color, border_color, border_width, 5))
+	panel.add_theme_stylebox_override("panel", _style_box(bg_color, border_color, border_width, 3))
 	_fill_rect(panel)
 	card.add_child(panel)
+
+	if dashed_border:
+		var dashed_border_control: Control = GraphDashedBorderScript.new() as Control
+		dashed_border_control.name = "DashedBorder"
+		_fill_rect(dashed_border_control)
+		dashed_border_control.call("configure", dashed_color, 1.0)
+		card.add_child(dashed_border_control)
 
 	var margin := MarginContainer.new()
 	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -1930,10 +2437,23 @@ func _graph_node_card(
 
 	var state_label := _label(state_text, 12, text_color, FONT_SERIF_REGULAR)
 	state_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	if locked:
+		meta_row.add_child(_icon(ICON_LOCK, Vector2(15, 15), text_color))
+
+	if _is_tutorial_case() and keyword_unlocked:
+		meta_row.add_child(_icon(
+			_tutorial_icon("unlock", ICON_KEY_ROUND),
+			Vector2(16, 16),
+			text_color
+		))
+
 	meta_row.add_child(state_label)
 
 	var hit_button := _transparent_hit_button()
 	hit_button.pressed.connect(_on_graph_node_pressed.bind(node_id))
+	hit_button.mouse_entered.connect(_on_graph_node_hovered.bind(node_id, true))
+	hit_button.mouse_exited.connect(_on_graph_node_hovered.bind(node_id, false))
 
 	card.add_child(hit_button)
 	return card
@@ -1971,10 +2491,38 @@ func _on_graph_node_pressed(node_id: String) -> void:
 		not runtime_state.unlocked_nodes.has(node_id)
 		and not runtime_state.is_keyword_unlocked(node_id)
 	):
+		_play_tutorial_ui_sound("ui_invalid")
+		return
+	if node_id == runtime_state.current_node_id:
+		return
+	if runtime_state.move_history_cursor_to_node(node_id) == "":
+		return
+	_play_tutorial_ui_sound("ui_click")
+	_show_history_cursor(runtime_state.history_cursor)
+
+
+func _on_graph_node_hovered(node_id: String, hovered: bool) -> void:
+	if not _is_tutorial_case() or _selected_keyword_instance_id == "":
 		return
 
-	_show_node(node_id)
-	_show_story_view()
+	if not hovered:
+		_set_tutorial_cursor("connect")
+		return
+
+	var instance: Dictionary = runtime_state.get_keyword_instance(_selected_keyword_instance_id)
+
+	if instance.is_empty():
+		_set_tutorial_cursor("forbidden")
+		return
+
+	var rule: Dictionary = loader.find_keyword_rule(
+		str(instance.get("normalized_text", "")),
+		str(instance.get("source_node_id", "")),
+		node_id
+	)
+	_set_tutorial_cursor(
+		"connect" if not rule.is_empty() and _rule_requirements_met(rule) else "forbidden"
+	)
 
 
 func _on_graph_keyword_pressed(instance_id: String) -> void:
@@ -1985,11 +2533,12 @@ func _on_graph_keyword_pressed(instance_id: String) -> void:
 		return
 
 	_selected_keyword_instance_id = instance_id
+	_set_tutorial_cursor("connect")
 
 	if (
 		_is_tutorial_case()
 		and str(instance.get("source_node_id", "")) == "tutorial_0006"
-		and str(instance.get("normalized_text", "")) == "封口白痕"
+		and str(instance.get("normalized_text", "")) == "页码缺口"
 	):
 		_mark_tutorial_flag(
 			"tutorial_first_keyword_selected",
@@ -1999,7 +2548,8 @@ func _on_graph_keyword_pressed(instance_id: String) -> void:
 	_render_graph_view()
 	_show_graph_status(
 		"已选择关键词：%s\n请选择要连接的剧情节点\nEsc 取消" % str(instance.get("text", "")),
-		true
+		true,
+		"keyword"
 	)
 
 
@@ -2007,13 +2557,15 @@ func _complete_keyword_connection(target_node_id: String) -> void:
 	var instance_id: String = _selected_keyword_instance_id
 	var instance: Dictionary = runtime_state.get_keyword_instance(instance_id)
 	_selected_keyword_instance_id = ""
+	_set_tutorial_cursor("default")
 
 	if _is_tutorial_case():
 		runtime_state.flags["tutorial_first_connection_attempted"] = true
 
 	if instance.is_empty():
 		_render_graph_view()
-		_show_graph_status("连接无效", false)
+		_play_tutorial_ui_sound("ui_connection_invalid")
+		_show_graph_status("连接无效", false, "connection_invalid")
 		return
 
 	var normalized_keyword: String = str(instance.get("normalized_text", ""))
@@ -2026,12 +2578,14 @@ func _complete_keyword_connection(target_node_id: String) -> void:
 
 	if rule.is_empty():
 		_render_graph_view()
-		_show_graph_status("连接无效", false)
+		_play_tutorial_ui_sound("ui_connection_invalid")
+		_show_graph_status("连接无效", false, "connection_invalid")
 		return
 
 	if not _rule_requirements_met(rule):
 		_render_graph_view()
-		_show_graph_status("请先完成当前教学目标", false)
+		_play_tutorial_ui_sound("ui_connection_invalid")
+		_show_graph_status("请先完成当前教学目标", false, "connection_invalid")
 		return
 
 	var outcome: String = str(rule.get("outcome", "")).to_lower()
@@ -2049,7 +2603,8 @@ func _complete_keyword_connection(target_node_id: String) -> void:
 			if str(connection_result.get("reason", "")) == "duplicate":
 				_show_graph_status("该连接已经存在", false)
 			else:
-				_show_graph_status("连接无效", false)
+				_play_tutorial_ui_sound("ui_connection_invalid")
+				_show_graph_status("连接无效", false, "connection_invalid")
 
 			return
 
@@ -2081,20 +2636,25 @@ func _complete_keyword_connection(target_node_id: String) -> void:
 
 		_apply_rule_flags(rule)
 
-		if bool(rule.get("autosave_on_success", false)):
+		if bool(rule.get("autosave_on_success", false)) and not _suppress_disk_autosave:
 			var current_node_data: Dictionary = loader.get_node(runtime_state.current_node_id)
 
 			if not current_node_data.is_empty():
 				_write_disk_autosave(current_node_data)
 
 		_refresh_graph_after_keyword_result()
+		_play_tutorial_ui_sound("ui_connection_correct")
+
+		if unlocked_new_node:
+			_play_node_unlock_delayed()
+
 		var success_text: String = "连接成立，已解锁新节点" if unlocked_new_node else "连接成立"
 		var feedback: String = str(rule.get("feedback", ""))
 
 		if feedback != "":
 			success_text += "\n" + feedback
 
-		_show_graph_status(success_text, false)
+		_show_graph_status(success_text, false, "connection_valid")
 
 		if _is_tutorial_case():
 			_mark_tutorial_flag(
@@ -2108,9 +2668,11 @@ func _complete_keyword_connection(target_node_id: String) -> void:
 		_apply_rule_flags(rule)
 		_refresh_graph_after_keyword_result()
 		var invalid_feedback: String = str(rule.get("feedback", ""))
+		_play_tutorial_ui_sound("ui_connection_invalid")
 		_show_graph_status(
 			"连接无效\n" + invalid_feedback if invalid_feedback != "" else "连接无效",
-			false
+			false,
+			"connection_invalid"
 		)
 		return
 
@@ -2126,9 +2688,11 @@ func _complete_keyword_connection(target_node_id: String) -> void:
 
 		_refresh_graph_after_keyword_result()
 		var error_feedback: String = str(rule.get("feedback", ""))
+		_play_tutorial_ui_sound("ui_inference_wrong")
 		_show_graph_status(
 			error_feedback if error_feedback != "" else "连接不成立",
-			false
+			false,
+			"warning"
 		)
 
 		if _is_tutorial_case():
@@ -2141,7 +2705,8 @@ func _complete_keyword_connection(target_node_id: String) -> void:
 
 	push_warning("MainUI: unsupported keyword rule outcome: " + outcome)
 	_render_graph_view()
-	_show_graph_status("连接无效", false)
+	_play_tutorial_ui_sound("ui_connection_invalid")
+	_show_graph_status("连接无效", false, "connection_invalid")
 
 
 func _rule_requirements_met(rule: Dictionary) -> bool:
@@ -2187,6 +2752,7 @@ func _refresh_graph_after_keyword_result() -> void:
 func _cancel_keyword_connection_selection(refresh_graph: bool) -> void:
 	var had_selection: bool = _selected_keyword_instance_id != ""
 	_selected_keyword_instance_id = ""
+	_set_tutorial_cursor("default")
 	_graph_feedback_generation += 1
 
 	if graph_status_panel != null:
@@ -2196,13 +2762,28 @@ func _cancel_keyword_connection_selection(refresh_graph: bool) -> void:
 		_render_graph_view()
 
 
-func _show_graph_status(text: String, persistent: bool) -> void:
+func _show_graph_status(text: String, persistent: bool, icon_key: String = "") -> void:
 	if graph_status_panel == null or graph_status_label == null:
 		return
 
 	_graph_feedback_generation += 1
 	var feedback_generation: int = _graph_feedback_generation
 	graph_status_label.text = text
+
+	if graph_status_icon != null:
+		var texture: Texture2D = (
+			KenneyAssetCatalog.icon(icon_key)
+			if _is_tutorial_case() and icon_key != ""
+			else null
+		)
+		graph_status_icon.texture = texture
+		graph_status_icon.visible = texture != null
+		graph_status_icon.modulate = C_WARNING if icon_key == "warning" else C_KENNEY_BLUE
+
+	graph_status_panel.add_theme_stylebox_override(
+		"panel",
+		_style_box(C_WHITE, C_WARNING if icon_key == "warning" else C_BLUE, 1, 4)
+	)
 	graph_status_panel.visible = true
 
 	if persistent:
@@ -2314,7 +2895,20 @@ func _build_audio_card(clue_data: Dictionary, source_node_id: String) -> void:
 	var track_header := HBoxContainer.new()
 	track_header.add_theme_constant_override("separation", 6)
 	info_box.add_child(track_header)
-	var track_label := _label("× " + track_label_text, 13, C_BLUE, FONT_MONO_MEDIUM)
+
+	if _is_tutorial_case():
+		track_header.add_child(_icon(
+			_tutorial_icon("audio_clue", ICON_PLAY),
+			Vector2(15, 15),
+			C_BLUE
+		))
+
+	var track_label := _label(
+		track_label_text if _is_tutorial_case() else "× " + track_label_text,
+		13,
+		C_BLUE,
+		FONT_MONO_MEDIUM
+	)
 	track_label.custom_minimum_size.x = 118
 	track_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	track_label.clip_text = true
@@ -2335,20 +2929,23 @@ func _build_audio_card(clue_data: Dictionary, source_node_id: String) -> void:
 	info_controls.add_theme_constant_override("separation", 5)
 	info_box.add_child(info_controls)
 
-	var play_button := _compact_audio_track_button(ICON_PLAY, "播放 " + track_label_text)
+	var play_button := _compact_audio_track_button(
+		_tutorial_icon("audio_play", ICON_PLAY),
+		"播放 " + track_label_text
+	)
 	play_button.disabled = not available
 	play_button.pressed.connect(_on_audio_play_pressed.bind(audio_clue_id))
 	info_controls.add_child(play_button)
 
-	var marker_button := _compact_audio_track_button(
-		ICON_BOOKMARK,
-		"在当前播放位置添加标记"
+	var time_label := _label(
+		"%s / %s" % [_format_audio_time(0.0), _format_audio_time(duration)],
+		11,
+		C_SUBTEXT,
+		FONT_MONO_REGULAR
 	)
-	marker_button.disabled = not available
-	marker_button.pressed.connect(
-		_on_audio_marker_pressed.bind(audio_clue_id, source_node_id)
-	)
-	info_controls.add_child(marker_button)
+	time_label.custom_minimum_size.x = 92
+	time_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	info_controls.add_child(time_label)
 
 	var feedback_label := _label(
 		"" if available else "音频资源暂不可用",
@@ -2372,10 +2969,10 @@ func _build_audio_card(clue_data: Dictionary, source_node_id: String) -> void:
 		_load_audio_waveform_samples(audio_path, waveform_data_path)
 	)
 	waveform.call("set_drag_enabled", available and duration > 0.0)
-	waveform.connect(
-		"seek_requested",
-		_on_audio_waveform_seek_requested.bind(audio_clue_id)
-	)
+	waveform.connect("playhead_drag_started", _on_audio_waveform_drag_started.bind(audio_clue_id))
+	waveform.connect("playhead_drag_updated", _on_audio_waveform_drag_updated.bind(audio_clue_id))
+	waveform.connect("playhead_drag_finished", _on_audio_waveform_drag_finished.bind(audio_clue_id))
+	waveform.connect("playhead_drag_cancelled", _on_audio_waveform_drag_cancelled.bind(audio_clue_id))
 
 	var divider := ColorRect.new()
 	divider.custom_minimum_size = Vector2(1, 100)
@@ -2405,12 +3002,10 @@ func _build_audio_card(clue_data: Dictionary, source_node_id: String) -> void:
 		"duration": duration,
 		"track_label": track_label_text,
 		"play_button": play_button,
-		"marker_button": marker_button,
-		"time_label": null,
+		"time_label": time_label,
 		"feedback_label": feedback_label,
 		"waveform": waveform
 	}
-	_refresh_audio_markers(audio_clue_id)
 
 
 func _load_audio_waveform_samples(
@@ -2479,6 +3074,8 @@ func _on_audio_play_pressed(audio_clue_id: String) -> void:
 		_show_audio_feedback(audio_clue_id, "音频资源暂不可用")
 		return
 
+	_play_tutorial_ui_sound("ui_click")
+
 	var current_audio_id: String = str(audio_manager.call("get_current_audio_id"))
 	var playing: bool = bool(audio_manager.call("is_playing"))
 	var paused: bool = bool(audio_manager.call("is_paused"))
@@ -2493,37 +3090,6 @@ func _on_audio_play_pressed(audio_clue_id: String) -> void:
 
 	if not bool(audio_manager.call("play_audio", audio_clue_id)):
 		_show_audio_feedback(audio_clue_id, "音频资源暂不可用")
-
-
-func _on_audio_marker_pressed(audio_clue_id: String, source_node_id: String) -> void:
-	if audio_manager == null or not _audio_card_controls.has(audio_clue_id):
-		return
-
-	var controls: Dictionary = _audio_card_controls[audio_clue_id]
-
-	if not bool(controls.get("available", false)):
-		_show_audio_feedback(audio_clue_id, "音频资源暂不可用")
-		return
-
-	if str(audio_manager.call("get_current_audio_id")) != audio_clue_id:
-		if not bool(audio_manager.call("prepare_audio", audio_clue_id)):
-			_show_audio_feedback(audio_clue_id, "音频资源暂不可用")
-			return
-
-	var position: float = float(audio_manager.call("get_playback_position"))
-	var label: String = _format_audio_time(position)
-	var result: Dictionary = runtime_state.add_audio_marker(
-		audio_clue_id,
-		source_node_id,
-		position,
-		label
-	)
-
-	if bool(result.get("added", false)):
-		_refresh_audio_markers(audio_clue_id)
-		_show_audio_feedback(audio_clue_id, "已标记 " + label)
-	else:
-		_show_audio_feedback(audio_clue_id, "该时间已标记")
 
 
 func _on_audio_started(audio_clue_id: String) -> void:
@@ -2561,10 +3127,13 @@ func _on_audio_finished(audio_clue_id: String) -> void:
 
 
 func _on_audio_progress_changed(audio_clue_id: String, position: float, duration: float) -> void:
+	if str(_audio_waveform_drag_state.get("audio_clue_id", "")) == audio_clue_id:
+		return
+
 	_update_audio_card_progress(audio_clue_id, position, duration)
 
 
-func _on_audio_waveform_seek_requested(progress_ratio: float, audio_clue_id: String) -> void:
+func _on_audio_waveform_drag_started(progress_ratio: float, audio_clue_id: String) -> void:
 	if audio_manager == null or not _audio_card_controls.has(audio_clue_id):
 		return
 
@@ -2574,14 +3143,112 @@ func _on_audio_waveform_seek_requested(progress_ratio: float, audio_clue_id: Str
 	if not bool(controls.get("available", false)) or duration <= 0.0:
 		return
 
-	if str(audio_manager.call("get_current_audio_id")) != audio_clue_id:
+	var current_audio_id := str(audio_manager.call("get_current_audio_id"))
+	var was_playing := current_audio_id == audio_clue_id and bool(audio_manager.call("is_playing"))
+	var was_paused := current_audio_id == audio_clue_id and bool(audio_manager.call("is_paused"))
+	var previous_position := float(audio_manager.call("get_playback_position")) if current_audio_id != "" else 0.0
+	var previous_playing := bool(audio_manager.call("is_playing"))
+	var previous_paused := bool(audio_manager.call("is_paused"))
+
+	if current_audio_id != audio_clue_id:
 		if not bool(audio_manager.call("prepare_audio", audio_clue_id)):
 			_show_audio_feedback(audio_clue_id, "音频资源暂不可用")
 			return
 
-	var safe_ratio: float = clampf(progress_ratio, 0.0, 1.0)
-	audio_manager.call("seek_audio", safe_ratio * duration)
-	_update_audio_card_progress(audio_clue_id, safe_ratio * duration, duration)
+	_audio_waveform_drag_state = {
+		"audio_clue_id": audio_clue_id,
+		"previous_audio_id": current_audio_id,
+		"previous_position": previous_position,
+		"previous_playing": previous_playing,
+		"previous_paused": previous_paused,
+		"was_playing_before_drag": was_playing,
+		"was_paused_before_drag": was_paused,
+		"was_stopped_before_drag": not was_playing and not was_paused,
+		"start_position": float(audio_manager.call("get_playback_position")),
+		"target_position": _safe_audio_seek_time(progress_ratio, duration),
+		"duration": duration
+	}
+
+	if was_playing:
+		audio_manager.call("pause_audio")
+	audio_manager.call("begin_scrub", audio_clue_id)
+	audio_manager.call("scrub_to", float(_audio_waveform_drag_state["target_position"]))
+
+	_update_audio_card_progress(
+		audio_clue_id,
+		float(_audio_waveform_drag_state["target_position"]),
+		duration
+	)
+
+
+func _on_audio_waveform_drag_updated(progress_ratio: float, audio_clue_id: String) -> void:
+	if str(_audio_waveform_drag_state.get("audio_clue_id", "")) != audio_clue_id:
+		return
+
+	var duration := float(_audio_waveform_drag_state.get("duration", 0.0))
+	var target_position := _safe_audio_seek_time(progress_ratio, duration)
+	_audio_waveform_drag_state["target_position"] = target_position
+	audio_manager.call("scrub_to", target_position)
+	_update_audio_card_progress(audio_clue_id, target_position, duration)
+
+
+func _on_audio_waveform_drag_finished(progress_ratio: float, audio_clue_id: String) -> void:
+	_finish_audio_waveform_drag(progress_ratio, audio_clue_id)
+
+
+func _on_audio_waveform_drag_cancelled(progress_ratio: float, audio_clue_id: String) -> void:
+	_cancel_active_audio_scrub()
+
+
+func _finish_audio_waveform_drag(progress_ratio: float, audio_clue_id: String) -> void:
+	if audio_manager == null or str(_audio_waveform_drag_state.get("audio_clue_id", "")) != audio_clue_id:
+		return
+
+	var drag_state := _audio_waveform_drag_state.duplicate(true)
+	var duration := float(drag_state.get("duration", 0.0))
+	var target_position := _safe_audio_seek_time(progress_ratio, duration)
+	_audio_waveform_drag_state.clear()
+	audio_manager.call("end_scrub")
+	audio_manager.call("seek_audio", target_position)
+
+	if bool(drag_state.get("was_playing_before_drag", false)):
+		audio_manager.call("resume_audio")
+
+	_update_audio_card_progress(audio_clue_id, target_position, duration)
+	_refresh_audio_button_states(audio_clue_id)
+
+
+func _cancel_active_audio_scrub() -> void:
+	if audio_manager == null or _audio_waveform_drag_state.is_empty():
+		return
+	var drag_state := _audio_waveform_drag_state.duplicate(true)
+	_audio_waveform_drag_state.clear()
+	audio_manager.call("end_scrub")
+	var previous_audio_id := str(drag_state.get("previous_audio_id", ""))
+	if previous_audio_id != "":
+		audio_manager.call("prepare_audio", previous_audio_id)
+		audio_manager.call("seek_audio", float(drag_state.get("previous_position", 0.0)))
+		if bool(drag_state.get("previous_playing", false)):
+			audio_manager.call("play_audio", previous_audio_id)
+		elif bool(drag_state.get("previous_paused", false)):
+			audio_manager.call("play_audio", previous_audio_id)
+			audio_manager.call("pause_audio")
+	else:
+		audio_manager.call("stop_audio")
+	for controls_value in _audio_card_controls.values():
+		if controls_value is Dictionary:
+			var waveform := (controls_value as Dictionary).get("waveform") as Control
+			if waveform != null and is_instance_valid(waveform):
+				waveform.call("cancel_playhead_drag", false)
+	_refresh_audio_button_states()
+
+
+func _safe_audio_seek_time(progress_ratio: float, duration: float) -> float:
+	if duration <= 0.0:
+		return 0.0
+
+	var maximum_seek := maxf(0.0, duration - 0.01)
+	return clampf(progress_ratio, 0.0, 1.0) * maximum_seek
 
 
 func _refresh_audio_progress_display() -> void:
@@ -2596,6 +3263,9 @@ func _refresh_audio_progress_display() -> void:
 	var audio_clue_id: String = str(audio_manager.call("get_current_audio_id"))
 
 	if audio_clue_id == "" or not _audio_card_controls.has(audio_clue_id):
+		return
+
+	if str(_audio_waveform_drag_state.get("audio_clue_id", "")) == audio_clue_id:
 		return
 
 	_update_audio_card_progress(
@@ -2644,39 +3314,21 @@ func _refresh_audio_button_states(_changed_audio_id: String = "") -> void:
 			continue
 
 		if audio_clue_id == current_audio_id and playing:
-			play_button.icon = ICON_PAUSE
+			play_button.icon = _tutorial_icon("audio_pause", ICON_PAUSE)
 			play_button.tooltip_text = "暂停 " + track_label_text
 			_set_compact_audio_button_active(play_button, true)
 		elif audio_clue_id == current_audio_id and paused:
-			play_button.icon = ICON_PLAY
+			play_button.icon = _tutorial_icon("audio_play", ICON_PLAY)
 			play_button.tooltip_text = "继续播放 " + track_label_text
 			_set_compact_audio_button_active(play_button, false)
 		elif audio_clue_id == _audio_finished_id:
-			play_button.icon = ICON_PLAY
+			play_button.icon = _tutorial_icon("audio_play", ICON_PLAY)
 			play_button.tooltip_text = "重播 " + track_label_text
 			_set_compact_audio_button_active(play_button, false)
 		else:
-			play_button.icon = ICON_PLAY
+			play_button.icon = _tutorial_icon("audio_play", ICON_PLAY)
 			play_button.tooltip_text = "播放 " + track_label_text
 			_set_compact_audio_button_active(play_button, false)
-
-
-func _refresh_audio_markers(audio_clue_id: String) -> void:
-	if not _audio_card_controls.has(audio_clue_id):
-		return
-
-	var controls: Dictionary = _audio_card_controls[audio_clue_id]
-	var waveform: Control = controls.get("waveform") as Control
-	var duration: float = float(controls.get("duration", 0.0))
-	var marker_ratios := PackedFloat32Array()
-
-	if duration > 0.0:
-		for marker in runtime_state.get_audio_markers_for_clue(audio_clue_id):
-			var marker_time: float = float(marker.get("time_seconds", 0.0))
-			marker_ratios.append(clampf(marker_time / duration, 0.0, 1.0))
-
-	if waveform != null:
-		waveform.call("set_marker_ratios", marker_ratios)
 
 
 func _show_audio_feedback(audio_clue_id: String, text: String) -> void:
@@ -2712,6 +3364,11 @@ func _stop_audio_for_context_change() -> void:
 
 
 func _cancel_audio_waveform_drags() -> void:
+	if not _audio_waveform_drag_state.is_empty():
+		_cancel_active_audio_scrub()
+		return
+	_audio_waveform_drag_state.clear()
+
 	for controls_value in _audio_card_controls.values():
 		if not (controls_value is Dictionary):
 			continue
@@ -2719,7 +3376,7 @@ func _cancel_audio_waveform_drags() -> void:
 		var waveform: Control = (controls_value as Dictionary).get("waveform") as Control
 
 		if waveform != null and is_instance_valid(waveform):
-			waveform.call("cancel_playhead_drag")
+			waveform.call("cancel_playhead_drag", false)
 
 
 func _get_audio_card_duration(audio_clue_id: String) -> float:
@@ -2917,50 +3574,55 @@ func _add_clue_ids(value: Variant, prefix: String, icon_texture: Texture2D) -> v
 
 
 func _build_graph_data(node_data: Dictionary) -> Dictionary:
-	var current_pos := Vector2(117, 78)
-	var target_positions: Array[Vector2] = [
-		Vector2(12, 22),
-		Vector2(222, 22),
-		Vector2(117, 145)
-	]
-	var graph_nodes: Array = [
-		{
-			"title": _short_graph_title(str(node_data.get("title", "当前节点"))),
-			"pos": current_pos,
-			"active": true
-		}
-	]
+	var graph_nodes: Array = []
 	var edges: Array = []
-	var choices: Variant = node_data.get("choices", [])
-	var target_index: int = 0
-
-	if choices is Array:
-		for choice in choices:
-			if not (choice is Dictionary):
-				continue
-
-			if not _choice_is_available(choice):
-				continue
-
-			var target_id: String = _get_choice_target_node_id(choice)
-
-			if target_id == "" or target_index >= target_positions.size():
-				continue
-
-			var target_data: Dictionary = loader.get_node(target_id)
-			var target_title: String = target_id
-
-			if not target_data.is_empty():
-				target_title = str(target_data.get("title", target_id))
-
-			var target_pos: Vector2 = target_positions[target_index]
-			graph_nodes.append({
-				"title": _short_graph_title(target_title),
-				"pos": target_pos,
-				"active": false
-			})
-			edges.append([current_pos + Vector2(48, 11), target_pos + Vector2(48, 11)])
-			target_index += 1
+	var visible_nodes := _get_visible_graph_nodes()
+	var bounds := Rect2()
+	var has_bounds := false
+	for node_id_value in visible_nodes.keys():
+		var node_id := str(node_id_value)
+		if not _graph_node_positions.has(node_id):
+			continue
+		var rect := Rect2(_graph_node_positions[node_id], _graph_node_sizes.get(node_id, GRAPH_NODE_SIZE))
+		bounds = bounds.merge(rect) if has_bounds else rect
+		has_bounds = true
+	if not has_bounds:
+		bounds = Rect2(Vector2.ZERO, Vector2.ONE)
+	_mini_graph_bounds = bounds.grow(40.0)
+	var mini_area := Vector2(314.0, 172.0)
+	var scale_factor := minf(mini_area.x / _mini_graph_bounds.size.x, mini_area.y / _mini_graph_bounds.size.y)
+	var offset := Vector2(8.0, 8.0) + (mini_area - _mini_graph_bounds.size * scale_factor) * 0.5
+	var mini_positions: Dictionary = {}
+	for node_id_value in visible_nodes.keys():
+		var node_id := str(node_id_value)
+		if not _graph_node_positions.has(node_id):
+			continue
+		var node_rect := Rect2(_graph_node_positions[node_id], _graph_node_sizes.get(node_id, GRAPH_NODE_SIZE))
+		var mini_pos := offset + (node_rect.get_center() - _mini_graph_bounds.position) * scale_factor - Vector2(48.0, 11.5)
+		mini_positions[node_id] = mini_pos
+		var data := loader.get_node(node_id)
+		graph_nodes.append({
+			"title": _short_graph_title(str(data.get("title", node_id))),
+			"pos": mini_pos,
+			"active": node_id == runtime_state.current_node_id
+		})
+	var added_pairs: Dictionary = {}
+	for transition in runtime_state.committed_transitions:
+		var source_id := str(transition.get("source_node_id", ""))
+		var target_id := str(transition.get("target_node_id", ""))
+		if not mini_positions.has(source_id) or not mini_positions.has(target_id):
+			continue
+		var pair_key := source_id + "->" + target_id
+		if added_pairs.has(pair_key):
+			continue
+		added_pairs[pair_key] = true
+		var style := _graph_edge_style(source_id, target_id, int(transition.get("history_index", -1)))
+		edges.append({
+			"from": mini_positions[source_id] + Vector2(48.0, 11.5),
+			"to": mini_positions[target_id] + Vector2(48.0, 11.5),
+			"color": style.get("color", C_MUTED),
+			"width": style.get("width", 1.0)
+		})
 
 	return {
 		"nodes": graph_nodes,
@@ -3037,6 +3699,7 @@ func _audio_action_button(text: String) -> Button:
 
 func _compact_audio_track_button(icon_texture: Texture2D, tooltip: String) -> Button:
 	var button := Button.new()
+	var icon_color: Color = C_KENNEY_BLUE if _is_tutorial_case() else C_BLUE
 	button.text = ""
 	button.icon = icon_texture
 	button.expand_icon = true
@@ -3044,11 +3707,11 @@ func _compact_audio_track_button(icon_texture: Texture2D, tooltip: String) -> Bu
 	button.tooltip_text = tooltip
 	button.custom_minimum_size = Vector2(28, 24)
 	button.focus_mode = Control.FOCUS_ALL
-	button.add_theme_color_override("icon_normal_color", C_BLUE)
+	button.add_theme_color_override("icon_normal_color", icon_color)
 	button.add_theme_color_override("icon_hover_color", C_WHITE)
 	button.add_theme_color_override("icon_pressed_color", C_WHITE)
-	button.add_theme_color_override("icon_focus_color", C_BLUE)
-	button.add_theme_color_override("icon_disabled_color", C_MUTED)
+	button.add_theme_color_override("icon_focus_color", icon_color)
+	button.add_theme_color_override("icon_disabled_color", C_KENNEY_DISABLED if _is_tutorial_case() else C_MUTED)
 	button.add_theme_stylebox_override("normal", _style_box(C_WHITE, C_LINE, 1, 1))
 	button.add_theme_stylebox_override("hover", _style_box(C_BLUE, C_BLUE, 1, 1))
 	button.add_theme_stylebox_override("pressed", _style_box(C_BLUE_DARK, C_BLUE_DARK, 1, 1))
@@ -3058,8 +3721,9 @@ func _compact_audio_track_button(icon_texture: Texture2D, tooltip: String) -> Bu
 
 
 func _set_compact_audio_button_active(button: Button, active: bool) -> void:
-	button.add_theme_color_override("icon_normal_color", C_WHITE if active else C_BLUE)
-	button.add_theme_color_override("icon_focus_color", C_WHITE if active else C_BLUE)
+	var icon_color: Color = C_KENNEY_BLUE if _is_tutorial_case() else C_BLUE
+	button.add_theme_color_override("icon_normal_color", C_WHITE if active else icon_color)
+	button.add_theme_color_override("icon_focus_color", C_WHITE if active else icon_color)
 	button.add_theme_stylebox_override(
 		"normal",
 		_style_box(C_BLUE if active else C_WHITE, C_BLUE if active else C_LINE, 1, 1)
@@ -3097,11 +3761,16 @@ func _nav_button(texture: Texture2D, text: String, active: bool, scene_path: Str
 	var root_control := Control.new()
 	root_control.custom_minimum_size = Vector2(128, 50)
 	root_control.set_meta("nav_active", active)
+	root_control.resized.connect(func():
+		root_control.pivot_offset = root_control.size * 0.5
+	)
 
 	var panel := PanelContainer.new()
 	panel.name = "Panel"
 	_fill_rect(panel)
-	panel.add_theme_stylebox_override("panel", _style_box(C_BLUE_ACTIVE if active else C_WHITE, C_BLUE_DARK if active else C_LINE, 1, 4))
+	var panel_style := _style_box(C_BLUE_ACTIVE if active else C_WHITE, C_BLUE_DARK if active else C_LINE, 1, 4)
+	panel.add_theme_stylebox_override("panel", panel_style)
+	root_control.set_meta("nav_style", panel_style)
 	root_control.add_child(panel)
 
 	var margin := MarginContainer.new()
@@ -3129,8 +3798,13 @@ func _nav_button(texture: Texture2D, text: String, active: bool, scene_path: Str
 
 	var hit_button := _transparent_hit_button()
 	hit_button.name = "HitButton"
+	hit_button.focus_mode = Control.FOCUS_ALL
 	hit_button.mouse_entered.connect(_on_nav_button_hovered.bind(root_control, true))
 	hit_button.mouse_exited.connect(_on_nav_button_hovered.bind(root_control, false))
+	hit_button.focus_entered.connect(_on_nav_button_focus_changed.bind(root_control, true))
+	hit_button.focus_exited.connect(_on_nav_button_focus_changed.bind(root_control, false))
+	hit_button.button_down.connect(_on_nav_button_button_down.bind(root_control))
+	hit_button.button_up.connect(_on_nav_button_button_up.bind(root_control))
 
 	if scene_path != "":
 		hit_button.pressed.connect(func():
@@ -3146,13 +3820,89 @@ func _get_nav_hit_button(nav_button: Control) -> Button:
 
 
 func _on_nav_button_hovered(nav_button: Control, hovered: bool) -> void:
-	if bool(nav_button.get_meta("nav_active", false)):
+	var hit_button := _get_nav_hit_button(nav_button)
+
+	if hit_button.disabled or bool(nav_button.get_meta("nav_active", false)):
 		return
 
-	var panel: PanelContainer = nav_button.get_node("Panel") as PanelContainer
-	var bg_color: Color = C_PANEL_SOFT if hovered else C_WHITE
-	var border_color: Color = C_BLUE if hovered else C_LINE
-	panel.add_theme_stylebox_override("panel", _style_box(bg_color, border_color, 1, 4))
+	_animate_nav_button(
+		nav_button,
+		C_PANEL_SOFT if hovered else C_WHITE,
+		C_BLUE if hovered else C_LINE,
+		Vector2.ONE,
+		NAV_HOVER_DURATION
+	)
+
+
+func _on_nav_button_focus_changed(nav_button: Control, focused: bool) -> void:
+	var hit_button := _get_nav_hit_button(nav_button)
+	_on_nav_button_hovered(nav_button, focused or hit_button.is_hovered())
+
+
+func _on_nav_button_button_down(nav_button: Control) -> void:
+	var hit_button := _get_nav_hit_button(nav_button)
+
+	if hit_button.disabled:
+		return
+
+	var active := bool(nav_button.get_meta("nav_active", false))
+	_animate_nav_button(
+		nav_button,
+		C_BLUE_DARK if active else Color("#DCE7FF"),
+		C_BLUE_DARK if active else C_BLUE,
+		Vector2(0.97, 0.97),
+		NAV_PRESS_DURATION
+	)
+
+
+func _on_nav_button_button_up(nav_button: Control) -> void:
+	var hit_button := _get_nav_hit_button(nav_button)
+
+	if hit_button.disabled:
+		return
+
+	var active := bool(nav_button.get_meta("nav_active", false))
+	var highlighted := hit_button.is_hovered() or hit_button.has_focus()
+	_animate_nav_button(
+		nav_button,
+		C_BLUE_ACTIVE if active else (C_PANEL_SOFT if highlighted else C_WHITE),
+		C_BLUE_DARK if active else (C_BLUE if highlighted else C_LINE),
+		Vector2.ONE,
+		NAV_RELEASE_DURATION
+	)
+
+
+func _animate_nav_button(
+	nav_button: Control,
+	background: Color,
+	border: Color,
+	target_scale: Vector2,
+	duration: float
+) -> void:
+	_kill_nav_button_tween(nav_button)
+	var style: StyleBoxFlat = nav_button.get_meta("nav_style") as StyleBoxFlat
+
+	if style == null:
+		return
+
+	var tween := create_tween().set_parallel(true)
+	tween.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.tween_property(style, "bg_color", background, duration)
+	tween.tween_property(style, "border_color", border, duration)
+	tween.tween_property(nav_button, "scale", target_scale, duration)
+	nav_button.set_meta("nav_tween", tween)
+
+
+func _kill_nav_button_tween(nav_button: Control) -> void:
+	if not nav_button.has_meta("nav_tween"):
+		return
+
+	var tween_value: Variant = nav_button.get_meta("nav_tween")
+
+	if tween_value is Tween and (tween_value as Tween).is_valid():
+		(tween_value as Tween).kill()
+
+	nav_button.remove_meta("nav_tween")
 
 
 func _set_nav_button_active(nav_button: Control, active: bool) -> void:
@@ -3160,15 +3910,21 @@ func _set_nav_button_active(nav_button: Control, active: bool) -> void:
 		return
 
 	nav_button.set_meta("nav_active", active)
+	_kill_nav_button_tween(nav_button)
+	nav_button.scale = Vector2.ONE
 
 	var panel: PanelContainer = nav_button.get_node("Panel") as PanelContainer
 	var nav_icon: TextureRect = nav_button.find_child("Icon", true, false) as TextureRect
 	var label: Label = nav_button.find_child("Label", true, false) as Label
+	var style: StyleBoxFlat = nav_button.get_meta("nav_style") as StyleBoxFlat
 
-	panel.add_theme_stylebox_override(
-		"panel",
-		_style_box(C_BLUE_ACTIVE if active else C_WHITE, C_BLUE_DARK if active else C_LINE, 1, 4)
-	)
+	if style == null:
+		style = _style_box(C_BLUE_ACTIVE if active else C_WHITE, C_BLUE_DARK if active else C_LINE, 1, 4)
+		panel.add_theme_stylebox_override("panel", style)
+		nav_button.set_meta("nav_style", style)
+	else:
+		style.bg_color = C_BLUE_ACTIVE if active else C_WHITE
+		style.border_color = C_BLUE_DARK if active else C_LINE
 	# `_icon()` stores its tint in `modulate`. Updating only `self_modulate`
 	# multiplies the new color by the old blue tint, so an activated icon can
 	# remain blue. Replace the actual tint and keep self_modulate neutral.
@@ -3183,6 +3939,7 @@ func _open_settings_page() -> void:
 
 	var source_context: String = _get_active_page_context()
 	_settings_source_context = source_context
+	_render_layer_operation_help("设置", "Esc 返回进入设置前的页面")
 	_settings_previous_focus = get_viewport().gui_get_focus_owner()
 	_stop_audio_for_context_change()
 	_hide_keyword_action()
@@ -3229,6 +3986,14 @@ func restore_settings_context(source_context: String) -> void:
 	_set_nav_button_active(save_nav_button, source_context == "save")
 	_set_nav_button_active(load_nav_button, source_context == "load")
 	_settings_source_context = ""
+	if source_context == "save":
+		_render_layer_operation_help("存档", "Esc 返回游戏界面")
+	elif source_context == "load":
+		_render_layer_operation_help("读取", "Esc 返回游戏界面")
+	else:
+		var current_data := loader.get_node(runtime_state.current_node_id)
+		if not current_data.is_empty():
+			_render_right_panel(current_data)
 	_restore_settings_previous_focus()
 
 
@@ -3251,6 +4016,7 @@ func _open_save_page() -> void:
 		return
 
 	_prepare_data_page_open()
+	_render_layer_operation_help("存档", "Esc 返回游戏界面")
 	load_view.call("close_page")
 	save_view.call("open_page")
 	_set_data_page_nav_state(true, false)
@@ -3262,6 +4028,7 @@ func _open_load_page() -> void:
 		return
 
 	_prepare_data_page_open()
+	_render_layer_operation_help("读取", "Esc 返回游戏界面")
 	save_view.call("close_page")
 	load_view.call("open_page")
 	_set_data_page_nav_state(false, true)
@@ -3283,11 +4050,21 @@ func _prepare_data_page_open() -> void:
 
 func _return_from_data_page() -> void:
 	_hide_data_pages()
+	var current_data := loader.get_node(runtime_state.current_node_id)
+	if not current_data.is_empty():
+		_render_right_panel(current_data)
 
 	if _return_to_graph_view:
 		_set_center_view(true)
 	else:
 		_set_center_view(false)
+
+
+func _render_layer_operation_help(title: String, description: String) -> void:
+	if clue_list == null:
+		return
+	_clear_children(clue_list)
+	clue_list.add_child(_clue_item(ICON_REFRESH_CW, title, description))
 
 
 func _hide_data_pages() -> void:
@@ -3316,6 +4093,7 @@ func _on_manual_save_requested(slot_index: int) -> void:
 		return
 
 	var node_data: Dictionary = loader.get_node(runtime_state.current_node_id)
+	_sync_graph_view_to_runtime()
 	var result: Dictionary = save_manager.save_manual(
 		slot_index,
 		_build_save_metadata(node_data),
@@ -3326,7 +4104,8 @@ func _on_manual_save_requested(slot_index: int) -> void:
 		save_view.call("report_save_result", result, slot_index)
 
 	if not bool(result.get("success", false)):
-		push_warning("MainUI: manual save failed: " + str(result.get("error", "")))
+		push_warning("MainUI: manual save failed:\n" + str(result.get("technical_error", result.get("error", ""))))
+		_show_save_error_modal()
 
 
 func _on_load_requested(slot_type: String, slot_index: int) -> void:
@@ -3382,8 +4161,10 @@ func _on_load_requested(slot_type: String, slot_index: int) -> void:
 		_report_load_failure("应用存档运行状态失败")
 		return
 
-	_node_history.clear()
+	_normalize_tutorial_investigation_flags()
+	_prepare_graph_view_from_runtime()
 	_render_node(loaded_node_data)
+	call_deferred("_apply_saved_graph_view")
 	story_scroll.scroll_vertical = 0
 	_hide_data_pages()
 	story_view.visible = true
@@ -3404,6 +4185,7 @@ func _write_disk_autosave(node_data: Dictionary) -> bool:
 	if save_manager == null:
 		return false
 
+	_sync_graph_view_to_runtime()
 	var result: Dictionary = save_manager.save_autosave(
 		_build_save_metadata(node_data),
 		runtime_state.to_save_dictionary()
@@ -3426,25 +4208,6 @@ func _build_save_metadata(node_data: Dictionary) -> Dictionary:
 	}
 
 
-func _record_current_node_for_history(target_node_id: String) -> void:
-	if runtime_state == null or loader == null:
-		return
-
-	var current_node_id: String = runtime_state.current_node_id
-
-	if current_node_id == "" or current_node_id == target_node_id:
-		return
-
-	var current_data: Dictionary = loader.get_node(current_node_id)
-
-	if not _is_valid_backtrack_node(current_data):
-		if not _node_history.is_empty() and _node_history[_node_history.size() - 1] == target_node_id:
-			_node_history.remove_at(_node_history.size() - 1)
-		return
-
-	_node_history.append(current_node_id)
-
-
 func _is_valid_backtrack_node(node_data: Dictionary) -> bool:
 	if node_data.is_empty() or bool(node_data.get("graph_only", false)):
 		return false
@@ -3462,32 +4225,17 @@ func _is_valid_backtrack_node(node_data: Dictionary) -> bool:
 func _has_backtrack_target() -> bool:
 	if runtime_state == null or loader == null:
 		return false
-
-	for history_index in range(_node_history.size() - 1, -1, -1):
-		var node_id: String = _node_history[history_index]
-
-		if (
-			node_id != runtime_state.current_node_id
-			and _is_valid_backtrack_node(loader.get_node(node_id))
-		):
+	for history_index in range(runtime_state.history_cursor - 1, -1, -1):
+		if _is_valid_backtrack_node(loader.get_node(runtime_state.visit_history[history_index])):
 			return true
-
 	return false
 
 
-func _pop_backtrack_target() -> String:
-	while not _node_history.is_empty():
-		var last_index: int = _node_history.size() - 1
-		var node_id: String = _node_history[last_index]
-		_node_history.remove_at(last_index)
-
-		if (
-			node_id != runtime_state.current_node_id
-			and _is_valid_backtrack_node(loader.get_node(node_id))
-		):
-			return node_id
-
-	return ""
+func _previous_history_index() -> int:
+	for history_index in range(runtime_state.history_cursor - 1, -1, -1):
+		if _is_valid_backtrack_node(loader.get_node(runtime_state.visit_history[history_index])):
+			return history_index
+	return -1
 
 
 func _update_backtrack_button_state() -> void:
@@ -3498,35 +4246,37 @@ func _update_backtrack_button_state() -> void:
 
 
 func _on_backtrack_pressed() -> void:
-	var previous_node_id: String = _pop_backtrack_target()
-
-	if previous_node_id == "":
+	var previous_index := _previous_history_index()
+	if previous_index < 0:
 		_update_backtrack_button_state()
 		_show_case_status("没有更早的调查节点。")
 		return
-
-	var previous_data: Dictionary = loader.get_node(previous_node_id)
-
-	if previous_data.is_empty():
-		_update_backtrack_button_state()
-		return
-
 	var node_before_backtrack: String = runtime_state.current_node_id
+	var previous_node_id := runtime_state.visit_history[previous_index]
+	_play_tutorial_ui_sound("ui_backtrack")
+	if (
+		_is_tutorial_case()
+		and node_before_backtrack == "tutorial_0003"
+		and previous_node_id in ["tutorial_0002a", "tutorial_0002b", "tutorial_0002c", "tutorial_0002d"]
+	):
+		runtime_state.flags["backtrack_tutorial_completed"] = true
+	_show_history_cursor(previous_index)
+
+
+func _show_history_cursor(index: int) -> void:
+	if runtime_state.visit_history.is_empty():
+		return
+	var safe_index := clampi(index, 0, runtime_state.visit_history.size() - 1)
+	runtime_state.history_cursor = safe_index
+	runtime_state.current_node_id = runtime_state.visit_history[safe_index]
+	var node_data := loader.get_node(runtime_state.current_node_id)
+	if node_data.is_empty():
+		return
 	_stop_audio_for_context_change()
 	_hide_keyword_action()
 	_cancel_keyword_connection_selection(false)
 	_hide_data_pages()
-
-	if (
-		_is_tutorial_case()
-		and node_before_backtrack == "tutorial_0003"
-		and previous_node_id in ["tutorial_0002a", "tutorial_0002b", "tutorial_0002c"]
-	):
-		runtime_state.flags["backtrack_tutorial_completed"] = true
-
-	runtime_state.current_node_id = previous_node_id
-	runtime_state.unlocked_nodes[previous_node_id] = true
-	_render_node(previous_data)
+	_render_node(node_data)
 	story_scroll.scroll_vertical = 0
 	story_view.visible = true
 	graph_view.visible = false
@@ -3541,11 +4291,16 @@ func _on_backtrack_pressed() -> void:
 func _show_story_view() -> void:
 	_hide_data_pages()
 	_set_center_view(false)
+	_set_tutorial_cursor("default")
 
 
 func _show_graph_view() -> void:
 	_hide_data_pages()
 	_set_center_view(true)
+	_queue_tutorial_modal_once("graph_controls", [
+		{"prompt": "mouse_left", "text": "鼠标左键：先点关键词，再点目标节点建立连接"},
+		{"prompt": "mouse_wheel", "text": "鼠标滚轮：上下浏览图谱"}
+	])
 
 	if (
 		_is_tutorial_case()
@@ -3556,6 +4311,107 @@ func _show_graph_view() -> void:
 			"tutorial_graph_opened",
 			"先选择一个关键词节点，再选择与它相关的剧情节点。"
 		)
+	if not _graph_has_fit:
+		call_deferred("_fit_graph_to_view")
+
+
+func _fit_graph_to_view() -> void:
+	if graph_scroll == null or _graph_canvas_size.x <= 0.0 or _graph_canvas_size.y <= 0.0:
+		return
+	var viewport_size := graph_scroll.size - Vector2(12.0, 12.0)
+	var bounds := Rect2()
+	var has_bounds := false
+	for node_id_value in _graph_node_positions.keys():
+		var node_id := str(node_id_value)
+		var rect := Rect2(_graph_node_positions[node_id], _graph_node_sizes.get(node_id, GRAPH_NODE_SIZE))
+		bounds = bounds.merge(rect) if has_bounds else rect
+		has_bounds = true
+	for layout_value in _keyword_graph_layout.values():
+		if layout_value is Dictionary:
+			var layout := layout_value as Dictionary
+			var rect := Rect2(layout.get("position", Vector2.ZERO), layout.get("size", KEYWORD_GRAPH_MIN_SIZE))
+			bounds = bounds.merge(rect) if has_bounds else rect
+			has_bounds = true
+	if not has_bounds:
+		bounds = Rect2(Vector2.ZERO, _graph_canvas_size)
+	bounds = bounds.grow(84.0)
+	var fit_zoom := minf(1.0, minf(viewport_size.x / bounds.size.x, viewport_size.y / bounds.size.y))
+	_set_graph_zoom(clampf(fit_zoom, 0.6, 1.7), viewport_size * 0.5)
+	var centered_scroll := bounds.get_center() * _graph_zoom - viewport_size * 0.5
+	graph_scroll.scroll_horizontal = maxi(0, roundi(centered_scroll.x))
+	graph_scroll.scroll_vertical = maxi(0, roundi(centered_scroll.y))
+	_graph_has_fit = true
+	_sync_graph_view_to_runtime()
+	_update_mini_viewport_rect()
+
+
+func _set_graph_zoom(value: float, cursor_in_view: Vector2) -> void:
+	var old_zoom := _graph_zoom
+	var new_zoom := clampf(value, 0.6, 1.7)
+	if is_equal_approx(old_zoom, new_zoom):
+		return
+	var content_point := (Vector2(graph_scroll.scroll_horizontal, graph_scroll.scroll_vertical) + cursor_in_view) / old_zoom
+	_graph_zoom = new_zoom
+	graph_canvas.scale = Vector2.ONE * _graph_zoom
+	graph_zoom_container.custom_minimum_size = _graph_canvas_size * _graph_zoom
+	graph_zoom_container.size = _graph_canvas_size * _graph_zoom
+	var target_scroll := content_point * _graph_zoom - cursor_in_view
+	graph_scroll.scroll_horizontal = maxi(0, roundi(target_scroll.x))
+	graph_scroll.scroll_vertical = maxi(0, roundi(target_scroll.y))
+	_sync_graph_view_to_runtime()
+	call_deferred("_update_mini_viewport_rect")
+
+
+func _sync_graph_view_to_runtime() -> void:
+	if runtime_state == null:
+		return
+	runtime_state.graph_view = {
+		"pan_x": float(graph_scroll.scroll_horizontal) if graph_scroll != null else 0.0,
+		"pan_y": float(graph_scroll.scroll_vertical) if graph_scroll != null else 0.0,
+		"zoom": _graph_zoom
+	}
+
+
+func _prepare_graph_view_from_runtime() -> void:
+	var saved_view: Dictionary = runtime_state.graph_view
+	_graph_zoom = clampf(float(saved_view.get("zoom", 1.0)), 0.6, 1.7)
+	_graph_has_fit = true
+
+
+func _apply_saved_graph_view() -> void:
+	await get_tree().process_frame
+	await get_tree().process_frame
+	if graph_scroll == null:
+		return
+	var saved_view: Dictionary = runtime_state.graph_view
+	graph_scroll.scroll_horizontal = maxi(0, roundi(float(saved_view.get("pan_x", 0.0))))
+	graph_scroll.scroll_vertical = maxi(0, roundi(float(saved_view.get("pan_y", 0.0))))
+	_update_mini_viewport_rect()
+
+
+func _on_graph_canvas_gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton:
+		var mouse_event := event as InputEventMouseButton
+		if mouse_event.button_index == MOUSE_BUTTON_RIGHT and mouse_event.pressed and _selected_keyword_instance_id != "":
+			_cancel_keyword_connection_selection(true)
+			graph_canvas.accept_event()
+			return
+		if mouse_event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN] and mouse_event.pressed:
+			var cursor_in_view := mouse_event.global_position - graph_scroll.global_position
+			var factor := 1.12 if mouse_event.button_index == MOUSE_BUTTON_WHEEL_UP else 1.0 / 1.12
+			_set_graph_zoom(_graph_zoom * factor, cursor_in_view)
+			graph_canvas.accept_event()
+			return
+		if mouse_event.button_index == MOUSE_BUTTON_LEFT:
+			if mouse_event.pressed:
+				_graph_pan_active = true
+				_graph_pan_dragged = false
+				_graph_pan_start_mouse = mouse_event.global_position
+				_graph_pan_start_scroll = Vector2(graph_scroll.scroll_horizontal, graph_scroll.scroll_vertical)
+			else:
+				_graph_pan_active = false
+				_set_tutorial_cursor("default")
+			graph_canvas.accept_event()
 
 
 func _set_center_view(show_graph: bool) -> void:
@@ -3580,7 +4436,6 @@ func _set_center_view(show_graph: bool) -> void:
 		if not current_data.is_empty():
 			_render_right_panel(current_data)
 
-		call_deferred("_scroll_graph_to_current")
 		call_deferred("_apply_scrollbar_styles")
 
 
@@ -3615,13 +4470,12 @@ func _scroll_graph_to_current() -> void:
 		var current_center: Vector2 = current_control.position + current_control.size * 0.5
 		horizontal_target = current_center.x - viewport_size.x * GRAPH_CURRENT_ANCHOR.x
 		vertical_target = current_center.y - viewport_size.y * GRAPH_CURRENT_ANCHOR.y
-	else:
-		var current_position: Vector2 = loader.get_graph_node_position(runtime_state.current_node_id)
-
-		if current_position.x >= 0.0 and current_position.y >= 0.0:
-			var fallback_center: Vector2 = current_position + GRAPH_NODE_SIZE * 0.5
-			horizontal_target = fallback_center.x - viewport_size.x * GRAPH_CURRENT_ANCHOR.x
-			vertical_target = fallback_center.y - viewport_size.y * GRAPH_CURRENT_ANCHOR.y
+	elif _graph_node_positions.has(runtime_state.current_node_id):
+		var current_position: Vector2 = _graph_node_positions[runtime_state.current_node_id]
+		var current_size: Vector2 = _graph_node_sizes.get(runtime_state.current_node_id, GRAPH_NODE_SIZE)
+		var fallback_center: Vector2 = current_position + current_size * 0.5
+		horizontal_target = fallback_center.x - viewport_size.x * GRAPH_CURRENT_ANCHOR.x
+		vertical_target = fallback_center.y - viewport_size.y * GRAPH_CURRENT_ANCHOR.y
 
 	horizontal_target = clampf(horizontal_target, 0.0, horizontal_bar.max_value)
 	vertical_target = clampf(vertical_target, 0.0, vertical_bar.max_value)
@@ -3648,12 +4502,15 @@ func _find_graph_node_control(node_id: String) -> Control:
 
 
 func _choice_button(texture: Texture2D, title: String, desc: String, choice: Dictionary) -> Control:
+	var history_review := bool(choice.get("_history_review", false))
+	var choice_color := C_MUTED if history_review else C_BLUE
+	var choice_border := C_DIVIDER if history_review else C_BLUE
 	var root_control := Control.new()
 	root_control.custom_minimum_size = Vector2(STORY_CONTENT_WIDTH, 62)
 
 	var panel := PanelContainer.new()
 	_fill_rect(panel)
-	panel.add_theme_stylebox_override("panel", _style_box(Color.TRANSPARENT, C_BLUE, 1, 4))
+	panel.add_theme_stylebox_override("panel", _style_box(Color.TRANSPARENT, choice_border, 1, 4))
 	root_control.add_child(panel)
 
 	var content_margin := MarginContainer.new()
@@ -3673,7 +4530,7 @@ func _choice_button(texture: Texture2D, title: String, desc: String, choice: Dic
 	var icon_box := CenterContainer.new()
 	icon_box.custom_minimum_size.x = 40
 	icon_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	icon_box.add_child(_icon(texture, Vector2(28, 28), C_BLUE))
+	icon_box.add_child(_icon(texture, Vector2(28, 28), choice_color))
 	row.add_child(icon_box)
 
 	var text_box := VBoxContainer.new()
@@ -3682,7 +4539,7 @@ func _choice_button(texture: Texture2D, title: String, desc: String, choice: Dic
 	text_box.add_theme_constant_override("separation", 1)
 	row.add_child(text_box)
 
-	var title_label := _label(title, 18, C_BLUE, FONT_SERIF_SEMIBOLD)
+	var title_label := _label(title, 18, choice_color, FONT_SERIF_SEMIBOLD)
 	title_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	text_box.add_child(title_label)
 
@@ -3691,7 +4548,7 @@ func _choice_button(texture: Texture2D, title: String, desc: String, choice: Dic
 	desc_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	text_box.add_child(desc_label)
 
-	var arrow := _label("›", 28, C_BLUE, FONT_MONO_MEDIUM)
+	var arrow := _label("›", 28, choice_color, FONT_MONO_MEDIUM)
 	arrow.custom_minimum_size.x = 24
 	arrow.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	arrow.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -3699,13 +4556,15 @@ func _choice_button(texture: Texture2D, title: String, desc: String, choice: Dic
 	row.add_child(arrow)
 
 	var hit_button := _transparent_hit_button()
+	hit_button.focus_mode = Control.FOCUS_ALL
+	hit_button.set_meta("story_choice", true)
 
 	hit_button.mouse_entered.connect(func():
-		panel.add_theme_stylebox_override("panel", _style_box(C_PANEL_SOFT, C_BLUE, 1, 4))
+		panel.add_theme_stylebox_override("panel", _style_box(C_PANEL_SOFT, choice_color, 1, 4))
 	)
 
 	hit_button.mouse_exited.connect(func():
-		panel.add_theme_stylebox_override("panel", _style_box(Color.TRANSPARENT, C_BLUE, 1, 4))
+		panel.add_theme_stylebox_override("panel", _style_box(Color.TRANSPARENT, choice_border, 1, 4))
 	)
 
 	hit_button.pressed.connect(func():
@@ -3765,7 +4624,9 @@ func _mini_graph(graph_data: Dictionary) -> Control:
 
 	if edges is Array:
 		for edge in edges:
-			if edge is Array and edge.size() >= 2:
+			if edge is Dictionary:
+				graph.add_child(_line(edge.get("from", Vector2.ZERO), edge.get("to", Vector2.ZERO), edge.get("color", C_MUTED), int(edge.get("width", 1))))
+			elif edge is Array and edge.size() >= 2:
 				graph.add_child(_line(edge[0], edge[1], C_LINE, 1))
 
 	var nodes: Variant = graph_data.get("nodes", [])
@@ -3781,7 +4642,33 @@ func _mini_graph(graph_data: Dictionary) -> Control:
 				bool(node_data.get("active", false))
 			))
 
+	mini_viewport_rect = PanelContainer.new()
+	mini_viewport_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mini_viewport_rect.z_index = 20
+	mini_viewport_rect.add_theme_stylebox_override("panel", _style_box(Color.TRANSPARENT, C_BLUE, 1, 1))
+	graph.add_child(mini_viewport_rect)
+	call_deferred("_update_mini_viewport_rect")
+
 	return panel
+
+
+func _update_mini_viewport_rect() -> void:
+	if mini_viewport_rect == null or not is_instance_valid(mini_viewport_rect) or graph_scroll == null:
+		return
+	if _mini_graph_bounds.size.x <= 0.0 or _mini_graph_bounds.size.y <= 0.0:
+		mini_viewport_rect.visible = false
+		return
+	mini_viewport_rect.visible = true
+	var mini_area := Vector2(314.0, 172.0)
+	var scale_factor := minf(mini_area.x / _mini_graph_bounds.size.x, mini_area.y / _mini_graph_bounds.size.y)
+	var offset := Vector2(8.0, 8.0) + (mini_area - _mini_graph_bounds.size * scale_factor) * 0.5
+	var view_position := Vector2(graph_scroll.scroll_horizontal, graph_scroll.scroll_vertical) / _graph_zoom
+	var view_size := graph_scroll.size / _graph_zoom
+	mini_viewport_rect.position = offset + (view_position - _mini_graph_bounds.position) * scale_factor
+	mini_viewport_rect.size = Vector2(
+		minf(mini_area.x, view_size.x * scale_factor),
+		minf(mini_area.y, view_size.y * scale_factor)
+	)
 
 
 func _graph_node(text: String, pos: Variant, active: bool) -> Control:
@@ -3801,7 +4688,7 @@ func _graph_node(text: String, pos: Variant, active: bool) -> Control:
 	return node
 
 
-func _line(from_pos: Variant, to_pos: Variant, color: Color, width: int) -> ColorRect:
+func _line(from_pos: Variant, to_pos: Variant, color: Color, width: int) -> Control:
 	var from_vec := Vector2.ZERO
 	var to_vec := Vector2.ZERO
 
@@ -3815,15 +4702,31 @@ func _line(from_pos: Variant, to_pos: Variant, color: Color, width: int) -> Colo
 	elif to_pos is Array and to_pos.size() >= 2:
 		to_vec = Vector2(float(to_pos[0]), float(to_pos[1]))
 
-	var line := ColorRect.new()
-	line.color = color
-
 	var diff: Vector2 = to_vec - from_vec
-	line.position = from_vec
-	line.size = Vector2(round(diff.length()), width)
-	line.rotation = diff.angle()
+	var root_control := Control.new()
+	root_control.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var line := Line2D.new()
+	line.points = PackedVector2Array([from_vec, to_vec])
+	line.width = float(width)
+	line.default_color = color
+	line.antialiased = true
+	root_control.add_child(line)
 
-	return line
+	if diff.length_squared() > 0.01:
+		var direction := diff.normalized()
+		var perpendicular := Vector2(-direction.y, direction.x)
+		var arrow_size := 5.0
+		var base := to_vec - direction * arrow_size
+		var arrow := Polygon2D.new()
+		arrow.polygon = PackedVector2Array([
+			to_vec,
+			base + perpendicular * arrow_size * 0.52,
+			base - perpendicular * arrow_size * 0.52
+		])
+		arrow.color = color
+		root_control.add_child(arrow)
+
+	return root_control
 
 
 func _attr_row(left: String, key: String) -> Control:
@@ -4064,6 +4967,10 @@ func _icon_by_name(name: String) -> Texture2D:
 			return ICON_SEARCH
 
 
+func _tutorial_icon(key: String, fallback: Texture2D) -> Texture2D:
+	return KenneyAssetCatalog.icon(key, fallback) if _is_tutorial_case() else fallback
+
+
 func _icon(texture: Texture2D, icon_size: Vector2, color: Color) -> TextureRect:
 	var rect := TextureRect.new()
 	rect.texture = texture
@@ -4167,6 +5074,7 @@ func _transparent_hit_button() -> Button:
 	var btn := Button.new()
 	btn.text = ""
 	btn.focus_mode = Control.FOCUS_NONE
+	btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	_fill_rect(btn)
 	btn.mouse_filter = Control.MOUSE_FILTER_STOP
 	btn.add_theme_stylebox_override("normal", _style_box(Color.TRANSPARENT, Color.TRANSPARENT, 0, 0))
@@ -4270,6 +5178,13 @@ func _apply_scrollbar_style(bar: ScrollBar, vertical: bool) -> void:
 
 
 func _on_choice_pressed(choice: Dictionary) -> void:
+	_play_tutorial_ui_sound("ui_click")
+	if bool(choice.get("_history_review", false)):
+		_show_history_cursor(runtime_state.history_cursor + 1)
+		return
+	if bool(choice.get("_failure_hint", false)):
+		_show_failure_hint(str(choice.get("_failure_hint_text", "")))
+		return
 	var action: String = str(choice.get("action", ""))
 
 	if action == "return_to_archive":
@@ -4324,15 +5239,30 @@ func _on_choice_pressed(choice: Dictionary) -> void:
 func _apply_node_flags(node_data: Dictionary) -> void:
 	var flags_value: Variant = node_data.get("set_flags", {})
 
-	if not (flags_value is Dictionary):
+	if flags_value is Dictionary:
+		for flag_value in (flags_value as Dictionary).keys():
+			var flag_name: String = str(flag_value)
+			var enabled_value: Variant = (flags_value as Dictionary).get(flag_value, false)
+
+			if flag_name != "" and enabled_value is bool:
+				runtime_state.flags[flag_name] = bool(enabled_value)
+
+	_normalize_tutorial_investigation_flags()
+
+
+func _normalize_tutorial_investigation_flags() -> void:
+	if not _is_tutorial_case() or runtime_state == null:
 		return
 
-	for flag_value in (flags_value as Dictionary).keys():
-		var flag_name: String = str(flag_value)
-		var enabled_value: Variant = (flags_value as Dictionary).get(flag_value, false)
+	var evidence_found := bool(runtime_state.flags.get("tutorial_seal_evidence_found", false))
+	var evidence_lost := bool(runtime_state.flags.get("tutorial_seal_evidence_lost", false))
 
-		if flag_name != "" and enabled_value is bool:
-			runtime_state.flags[flag_name] = bool(enabled_value)
+	if evidence_found and evidence_lost:
+		push_warning(
+			"MainUI: conflicting T-00 seal evidence flags; preserving the earlier "
+			+ "pre-opening observation and clearing the later loss flag."
+		)
+		runtime_state.flags["tutorial_seal_evidence_lost"] = false
 
 
 func _node_marks_case_completed(node_data: Dictionary) -> bool:
@@ -4348,6 +5278,24 @@ func _node_marks_case_completed(node_data: Dictionary) -> bool:
 
 func _is_tutorial_case() -> bool:
 	return str(_case_descriptor.get("case_type", "")) == "tutorial"
+
+
+func _play_tutorial_ui_sound(event_key: String) -> void:
+	if ui_sound_manager != null:
+		ui_sound_manager.call("play", event_key)
+
+
+func _play_node_unlock_delayed() -> void:
+	if not _is_tutorial_case():
+		return
+
+	await get_tree().create_timer(0.22).timeout
+	_play_tutorial_ui_sound("ui_node_unlock")
+
+
+func _set_tutorial_cursor(mode: String) -> void:
+	if _is_tutorial_case() and cursor_manager != null:
+		cursor_manager.call("set_mode", mode)
 
 
 func _mark_tutorial_flag(flag_name: String, message: String) -> void:

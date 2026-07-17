@@ -1,32 +1,37 @@
 {
 	"keyword_presets": {
 		"tutorial_0006": [
-			{"keyword": "封口白痕", "anchor_text": "封口白痕", "occurrence_index": 0}
+			{"keyword": "页码缺口", "anchor_text": "页码缺口", "occurrence_index": 0}
 		],
 		"tutorial_0007": [
-			{"keyword": "T-00编号", "anchor_text": "T-00编号", "occurrence_index": 0},
-			{"keyword": "页码缺口", "anchor_text": "页码缺口", "occurrence_index": 0}
+			{"keyword": "T-00编号", "anchor_text": "T-00编号", "occurrence_index": 0}
+		],
+		"tutorial_0007s": [
+			{"keyword": "封口白痕", "anchor_text": "封口白痕", "occurrence_index": 0}
 		]
 	},
 	"keyword_rules": [
 		{
-			"keyword": "封口白痕",
+			"keyword": "页码缺口",
 			"source_nodes": ["tutorial_0006"],
 			"connections": [
 				{
-					"target_node_id": "tutorial_inference_seal",
+					"target_node_id": "tutorial_inference_file_change",
 					"outcome": "correct",
-					"unlock_node_ids": ["tutorial_inference_seal", "tutorial_0007"],
-					"set_flags": {"tutorial_seal_connection_completed": true},
+					"unlock_node_ids": ["tutorial_inference_file_change", "tutorial_0007"],
+					"set_flags": {"tutorial_page_connection_completed": true},
 					"autosave_on_success": true,
-					"feedback": "胶层沿封口留下了受拉扯或二次粘合的痕迹。档案袋当前的封口状态与正常封存状态并不一致。"
+					"feedback": "第一页与第三页之间存在连续页码缺口，能够证明当前文件数量与封存登记不一致。"
 				},
 				{
 					"target_node_id": "tutorial_hypothesis_admin",
 					"outcome": "error",
 					"error_node_id": "tutorial_0008e",
-					"requires_flags": {"tutorial_invalid_connection_seen": true},
-					"feedback": "封口白痕能够说明封口被重新处理，但不能确认由档案管理员取走了第二页。"
+					"requires_flags": {
+						"tutorial_page_connection_completed": true,
+						"tutorial_invalid_connection_seen": true
+					},
+					"feedback": "页码缺口能证明文件数量变化，却不能确认由档案管理员取走第二页。"
 				}
 			]
 		},
@@ -38,29 +43,33 @@
 					"target_node_id": "tutorial_inference_file_change",
 					"outcome": "invalid",
 					"set_flags": {"tutorial_invalid_connection_seen": true},
-					"feedback": "T-00只是档案的识别编号。它不能说明档案中的文件数量是否发生过变化。"
+					"feedback": "T-00编号只能识别档案，不能证明文件数量发生变化。"
 				}
 			]
 		},
 		{
-			"keyword": "页码缺口",
-			"source_nodes": ["tutorial_0007"],
+			"keyword": "封口白痕",
+			"source_nodes": ["tutorial_0007s"],
 			"connections": [
 				{
-					"target_node_id": "tutorial_inference_file_change",
+					"target_node_id": "tutorial_inference_seal",
 					"outcome": "correct",
-					"requires_flags": {
-						"tutorial_seal_connection_completed": true,
-						"tutorial_returned_safe": true
-					},
-					"unlock_node_ids": [
-						"tutorial_inference_file_change",
-						"tutorial_inference_final",
-						"tutorial_0009"
-					],
-					"set_flags": {"tutorial_page_connection_completed": true},
+					"requires_flags": {"tutorial_seal_evidence_found": true},
+					"unlock_node_ids": ["tutorial_inference_seal", "tutorial_0007"],
+					"set_flags": {"tutorial_seal_connection_completed": true},
 					"autosave_on_success": true,
-					"feedback": "现存第一页和第三页之间缺少第二页，与封存时三页连续编号的记录不一致。"
+					"feedback": "拆封前记录的白痕沿原粘合线分布，能够支持原始封口经过再次处理。"
+				},
+				{
+					"target_node_id": "tutorial_hypothesis_admin",
+					"outcome": "error",
+					"error_node_id": "tutorial_0008e",
+					"requires_flags": {
+						"tutorial_page_connection_completed": true,
+						"tutorial_invalid_connection_seen": true,
+						"tutorial_seal_evidence_found": true
+					},
+					"feedback": "封口白痕可以支持封口经过再次处理，却不能确认处理者或缺页责任人。"
 				}
 			]
 		}

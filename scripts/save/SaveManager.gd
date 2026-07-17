@@ -1,11 +1,12 @@
 extends RefCounted
 class_name SaveManager
 
-const FORMAT_VERSION := 1
+const FORMAT_VERSION := 2
 const DEFAULT_SAVE_DIR := "user://saves"
 const MANUAL_SLOT_COUNT := 20
 const SLOTS_PER_PAGE := 7
 const PAGE_COUNT := 3
+const JsonVariantNormalizerScript := preload("res://scripts/save/JsonVariantNormalizer.gd")
 
 var save_directory: String = DEFAULT_SAVE_DIR
 var case_id: String = "case_01"
@@ -138,7 +139,7 @@ func _save_slot(
 	if not bool(init_result.get("success", false)):
 		return init_result
 
-	var document: Dictionary = {
+	var raw_document: Dictionary = {
 		"format_version": FORMAT_VERSION,
 		"case_id": case_id,
 		"slice_id": slice_id,
@@ -148,10 +149,27 @@ func _save_slot(
 		"metadata": metadata.duplicate(true),
 		"runtime_state": runtime_state.duplicate(true)
 	}
-	var validation: Dictionary = _validator.validate_document(document, slot_type, slot_index)
+	var validation: Dictionary = _validator.validate_document(raw_document, slot_type, slot_index)
 
 	if not bool(validation.get("valid", false)):
-		return _failure("存档数据无效：" + str(validation.get("error", "未知错误")))
+		return _stage_failure("runtime_state_before_serialization", validation, "保存前运行状态校验失败")
+	print_verbose("SaveManager: runtime_state_before_serialization valid")
+
+	var normalization := JsonVariantNormalizerScript.normalize(raw_document, "save_document")
+	if not bool(normalization.get("success", false)):
+		return _failure(
+			"存档数据无法序列化",
+			str(normalization.get("error", "JSON normalization failed")),
+			"runtime_state_after_normalization"
+		)
+	var normalized_value: Variant = normalization.get("value")
+	if not (normalized_value is Dictionary):
+		return _failure("存档数据无法序列化", "save_document: normalized root is not a Dictionary", "runtime_state_after_normalization")
+	var document := normalized_value as Dictionary
+	var normalized_validation := _validator.validate_document(document, slot_type, slot_index)
+	if not bool(normalized_validation.get("valid", false)):
+		return _stage_failure("runtime_state_after_normalization", normalized_validation, "规范化后运行状态校验失败")
+	print_verbose("SaveManager: runtime_state_after_normalization valid")
 
 	var path: String = _slot_path(slot_type, slot_index)
 	var write_result: Dictionary = _write_document_safely(path, document, slot_type, slot_index)
@@ -186,13 +204,20 @@ func _read_and_validate(path: String, slot_type: String, slot_index: int) -> Dic
 	var parse_error: Error = json.parse(content)
 
 	if parse_error != OK:
+		var parse_technical_error := "save_document: JSON parse failed, message=%s, line=%d, path=%s" % [
+			json.get_error_message(),
+			json.get_error_line(),
+			ProjectSettings.globalize_path(path)
+		]
 		return {
 			"success": false,
 			"status": "corrupted",
 			"error": "存档 JSON 损坏：%s（第 %d 行）" % [
 				json.get_error_message(),
 				json.get_error_line()
-			]
+			],
+			"technical_error": parse_technical_error,
+			"failure_stage": "runtime_state_after_reload"
 		}
 
 	var parsed: Variant = json.data
@@ -201,18 +226,35 @@ func _read_and_validate(path: String, slot_type: String, slot_index: int) -> Dic
 		return {
 			"success": false,
 			"status": "corrupted",
-			"error": "存档根数据不是字典"
+			"error": "存档根数据不是字典",
+			"technical_error": "save_document: expected Dictionary, got %s, value=%s" % [
+				type_string(typeof(parsed)),
+				str(parsed).left(120)
+			],
+			"failure_stage": "runtime_state_after_reload"
 		}
 
-	var data: Dictionary = parsed
+	var migration := _validator.migrate_document(parsed as Dictionary)
+	if not bool(migration.get("success", false)):
+		return {
+			"success": false,
+			"status": str(migration.get("status", "corrupted")),
+			"error": str(migration.get("error", "存档迁移失败")),
+			"technical_error": str(migration.get("error", "存档迁移失败")),
+			"failure_stage": "runtime_state_after_reload"
+		}
+	var data: Dictionary = migration.get("data", {})
 	var validation: Dictionary = _validator.validate_document(data, slot_type, slot_index)
 
 	if not bool(validation.get("valid", false)):
 		return {
 			"success": false,
 			"status": str(validation.get("status", "corrupted")),
-			"error": str(validation.get("error", "存档校验失败"))
+			"error": str(validation.get("error", "存档校验失败")),
+			"technical_error": str(validation.get("error", "存档校验失败")),
+			"failure_stage": "runtime_state_after_reload"
 		}
+	print_verbose("SaveManager: runtime_state_after_reload valid; path=" + ProjectSettings.globalize_path(path))
 
 	return {
 		"success": true,
@@ -235,9 +277,22 @@ func _write_document_safely(
 	if file == null:
 		return _failure("无法写入临时存档文件")
 
-	file.store_string(JSON.stringify(document, "\t", false))
+	var json_text := JSON.stringify(document, "\t", false)
+	file.store_string(json_text)
 	file.flush()
 	file.close()
+	var readback_file := FileAccess.open(temporary_path, FileAccess.READ)
+	var expected_bytes := json_text.to_utf8_buffer().size()
+	if readback_file == null:
+		return _failure("无法重新打开临时存档文件", "temporary file could not be reopened: " + ProjectSettings.globalize_path(temporary_path), "runtime_state_after_reload")
+	var actual_bytes := readback_file.get_length()
+	readback_file.close()
+	if actual_bytes != expected_bytes:
+		return _failure(
+			"临时存档写入不完整",
+			"temporary file byte length mismatch: expected=%d actual=%d path=%s" % [expected_bytes, actual_bytes, ProjectSettings.globalize_path(temporary_path)],
+			"runtime_state_after_reload"
+		)
 
 	var temporary_validation: Dictionary = _read_and_validate(
 		temporary_path,
@@ -246,8 +301,10 @@ func _write_document_safely(
 	)
 
 	if not bool(temporary_validation.get("success", false)):
-		_remove_file_if_present(temporary_path)
-		return _failure("临时存档校验失败：" + str(temporary_validation.get("error", "")))
+		var temporary_absolute := ProjectSettings.globalize_path(temporary_path)
+		var technical_error := str(temporary_validation.get("technical_error", temporary_validation.get("error", "")))
+		push_warning("SaveManager: runtime_state_after_reload failed:\n%s\ntemporary_path=%s" % [technical_error, temporary_absolute])
+		return _failure("临时存档校验失败", technical_error + "\ntemporary_path=" + temporary_absolute, "runtime_state_after_reload")
 
 	var absolute_path: String = ProjectSettings.globalize_path(path)
 	var absolute_temporary_path: String = ProjectSettings.globalize_path(temporary_path)
@@ -428,10 +485,19 @@ func _success() -> Dictionary:
 	}
 
 
-func _failure(error: String) -> Dictionary:
-	push_warning("SaveManager: " + error)
+func _stage_failure(stage: String, validation: Dictionary, public_error: String) -> Dictionary:
+	var technical_error := str(validation.get("error", "unknown validation error"))
+	push_warning("SaveManager: %s failed:\n%s" % [stage, technical_error])
+	return _failure(public_error, technical_error, stage)
+
+
+func _failure(error: String, technical_error: String = "", failure_stage: String = "") -> Dictionary:
+	var log_text := technical_error if technical_error != "" else error
+	push_warning("SaveManager: " + log_text)
 	return {
 		"success": false,
 		"status": "error",
-		"error": error
+		"error": error,
+		"technical_error": technical_error,
+		"failure_stage": failure_stage
 	}

@@ -11,8 +11,8 @@
 			"id": "clue_tutorial_seal_mark",
 			"title": "封口白痕",
 			"type": "关键词线索",
-			"source_node": "tutorial_0006",
-			"summary": "位于档案袋粘合边缘的细窄痕迹，可能由胶层受到拉扯或二次粘合形成。"
+			"source_node": "tutorial_0007s",
+			"summary": "拆封前记录在档案袋粘合边缘的细窄白痕，可能由胶层受拉扯或二次粘合形成。"
 		},
 		{
 			"id": "clue_tutorial_archive_id",
@@ -25,7 +25,7 @@
 			"id": "clue_tutorial_page_gap",
 			"title": "页码缺口",
 			"type": "关键词线索",
-			"source_node": "tutorial_0007",
+			"source_node": "tutorial_0006",
 			"summary": "现存第一页和第三页之间缺少第二页，与封存登记的连续编号不一致。"
 		}
 	]
