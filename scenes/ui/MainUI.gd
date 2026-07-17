@@ -9,6 +9,7 @@ signal case_completion_requested(case_id: String)
 const AudioWaveformPlaceholder := preload("res://scripts/case/AudioWaveformPlaceholder.gd")
 const CaseGraphCanvasScript := preload("res://scripts/case/CaseGraphCanvas.gd")
 const GraphDashedBorderScript := preload("res://scripts/case/GraphDashedBorder.gd")
+const GraphGridBackgroundScript := preload("res://scripts/case/GraphGridBackground.gd")
 const NarrativeGraphLayoutScript := preload("res://scripts/case/NarrativeGraphLayout.gd")
 const KenneyAssetCatalog := preload("res://scripts/ui/KenneyAssetCatalog.gd")
 const TutorialModalScript := preload("res://scripts/ui/TutorialModal.gd")
@@ -149,6 +150,7 @@ var keyword_popup_node: PanelContainer
 var keyword_context_menu: PanelContainer
 
 var graph_scroll: ScrollContainer
+var graph_grid_background: GraphGridBackground
 var graph_zoom_container: Control
 var graph_canvas: CaseGraphCanvas
 var graph_status_panel: PanelContainer
@@ -167,6 +169,7 @@ var _graph_pan_dragged: bool = false
 var _graph_pan_start_mouse := Vector2.ZERO
 var _graph_pan_start_scroll := Vector2.ZERO
 var _graph_canvas_size := Vector2.ZERO
+var _active_path_transition_indices: Dictionary = {}
 
 var tutorial_modal: Control
 var _tutorial_modal_queue: Array[Dictionary] = []
@@ -177,9 +180,6 @@ var _save_error_modal_active: bool = false
 var current_node_title: Label
 var current_node_body: Label
 var clue_list: VBoxContainer
-var graph_slot: VBoxContainer
-var mini_viewport_rect: Control
-var _mini_graph_bounds := Rect2()
 
 var attr_type_value: Label
 var attr_location_value: Label
@@ -293,7 +293,7 @@ func _input(event: InputEvent) -> void:
 			graph_scroll.scroll_horizontal = maxi(0, roundi(_graph_pan_start_scroll.x - delta.x))
 			graph_scroll.scroll_vertical = maxi(0, roundi(_graph_pan_start_scroll.y - delta.y))
 			_sync_graph_view_to_runtime()
-			_update_mini_viewport_rect()
+			_update_graph_grid()
 			get_viewport().set_input_as_handled()
 			return
 		if event is InputEventMouseButton and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT and not (event as InputEventMouseButton).pressed:
@@ -747,12 +747,21 @@ func _build_center_panel() -> Control:
 	_fill_rect(graph_view)
 	panel.add_child(graph_view)
 
+	graph_grid_background = GraphGridBackgroundScript.new() as GraphGridBackground
+	graph_grid_background.name = "GraphGridBackground"
+	_fill_rect(graph_grid_background)
+	graph_view.add_child(graph_grid_background)
+
 	graph_scroll = ScrollContainer.new()
 	graph_scroll.name = "GraphScroll"
 	graph_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	graph_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	graph_scroll.mouse_filter = Control.MOUSE_FILTER_STOP
+	graph_scroll.gui_input.connect(_on_graph_canvas_gui_input)
 	_fill_rect(graph_scroll)
 	graph_view.add_child(graph_scroll)
+	graph_scroll.get_h_scroll_bar().value_changed.connect(_on_graph_scroll_value_changed)
+	graph_scroll.get_v_scroll_bar().value_changed.connect(_on_graph_scroll_value_changed)
 
 	graph_zoom_container = Control.new()
 	graph_zoom_container.name = "GraphZoomContainer"
@@ -898,12 +907,21 @@ func _build_right_panel() -> Control:
 	panel.name = "RightPanel"
 	panel.add_theme_stylebox_override("panel", _style_box(C_BG, C_DIVIDER, 1, 0))
 
+	var scroll := ScrollContainer.new()
+	scroll.name = "RightPanelScroll"
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	panel.add_child(scroll)
+
 	var margin := MarginContainer.new()
+	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	margin.add_theme_constant_override("margin_left", SIDE_MARGIN_LEFT)
 	margin.add_theme_constant_override("margin_right", SIDE_MARGIN_RIGHT)
 	margin.add_theme_constant_override("margin_top", SIDE_MARGIN_TOP)
 	margin.add_theme_constant_override("margin_bottom", SIDE_MARGIN_BOTTOM)
-	panel.add_child(margin)
+	scroll.add_child(margin)
 
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 11)
@@ -968,17 +986,8 @@ func _build_right_panel() -> Control:
 	box.add_child(_section_title("操作说明"))
 
 	clue_list = VBoxContainer.new()
-	clue_list.add_theme_constant_override("separation", 8)
+	clue_list.add_theme_constant_override("separation", 7)
 	box.add_child(clue_list)
-
-	box.add_child(_right_divider())
-	box.add_child(_section_title("关联节点"))
-
-	graph_slot = VBoxContainer.new()
-	box.add_child(graph_slot)
-
-	var graph_link := _label("查看完整图谱 →", 14, C_BLUE, FONT_SERIF_REGULAR)
-	box.add_child(graph_link)
 
 	box.add_child(_right_divider())
 	box.add_child(_section_title("节点属性"))
@@ -1048,6 +1057,7 @@ func _enter_with_loaded_runtime(runtime_data: Dictionary) -> bool:
 	_set_nav_button_active(save_nav_button, false)
 	_set_nav_button_active(load_nav_button, false)
 	_set_nav_button_active(settings_nav_button, false)
+	_render_right_panel(loaded_node_data)
 	return true
 
 
@@ -1812,22 +1822,24 @@ func _render_right_panel(node_data: Dictionary) -> void:
 
 	_clear_children(clue_list)
 	if graph_view != null and graph_view.visible:
-		clue_list.add_child(_clue_item(ICON_SEARCH, "浏览图谱", "拖动空白处平移 · 滚轮围绕指针缩放"))
-		clue_list.add_child(_clue_item(ICON_BOOK_OPEN, "回看记录", "点击已访问节点 · Tab 返回剧情"))
+		_add_operation_help("Tab", "返回剧情")
+		_add_operation_help("Esc", "取消当前连接" if _selected_keyword_instance_id != "" else "返回或取消当前操作")
+		_add_operation_help("左键", "选择节点")
+		_add_operation_help("拖动", "移动画布")
+		_add_operation_help("滚轮", "缩放图谱")
+		_add_operation_help("右键", "取消选择或删除关键词")
 	else:
-		clue_list.add_child(_clue_item(ICON_BOOK_OPEN, "调查选择", "↑ / ↓ 选择 · Enter 确认 · Tab 查看图谱"))
-		clue_list.add_child(_clue_item(ICON_SEARCH, "正文交互", "鼠标左键选择选项或提取关键词"))
-		for keyword_instance in runtime_state.get_keyword_instances():
-			if not runtime_state.is_keyword_instance_connected(str(keyword_instance.get("instance_id", ""))):
-				clue_list.add_child(_clue_item(ICON_KEY_ROUND, "关键词整理", "鼠标右键删除未固定关键词"))
-				break
+		_add_operation_help("Tab", "切换到图谱")
+		_add_operation_help("Esc", "返回或关闭上层页面")
 		if _first_array_value(node_data.get("audio_clues", []), "") != "":
-			clue_list.add_child(_clue_item(ICON_PLAY, "音频复核", "Space 播放/暂停 · 拖动波形实时擦洗"))
-		if runtime_state.is_reviewing_history():
-			clue_list.add_child(_clue_item(ICON_REFRESH_CW, "路径回看", "灰色选项只沿已提交路径前进，不会重做选择"))
-
-	_clear_children(graph_slot)
-	graph_slot.add_child(_mini_graph(_build_graph_data(node_data)))
+			_add_operation_help("Space", "播放 / 暂停音频")
+		if _has_story_choice_controls():
+			_add_operation_help("Enter", "确认当前选项")
+			_add_operation_help("↑", "选择上一项")
+			_add_operation_help("↓", "选择下一项")
+		_add_operation_help("左键", "选择选项或提取关键词")
+		if _has_removable_keyword():
+			_add_operation_help("右键", "删除未固定关键词")
 
 	attr_type_value.text = str(node_data.get("node_type", "—"))
 	attr_location_value.text = str(node_data.get("location", "—"))
@@ -1870,16 +1882,29 @@ func _render_graph_view() -> void:
 	_graph_node_sizes = (graph_layout_result.get("sizes", {}) as Dictionary).duplicate(true)
 	_graph_node_depths = (graph_layout_result.get("depths", {}) as Dictionary).duplicate(true)
 	var canvas_size: Vector2 = graph_layout_result.get("canvas_size", Vector2(1080.0, 720.0))
+	var minimum_anchor_canvas := graph_scroll.size / 0.6 + Vector2(240.0, 240.0)
+	var expanded_canvas := Vector2(
+		maxf(canvas_size.x, minimum_anchor_canvas.x),
+		maxf(canvas_size.y, minimum_anchor_canvas.y)
+	)
+	var layout_offset := (expanded_canvas - canvas_size) * 0.5
+	if layout_offset != Vector2.ZERO:
+		for node_id_value in _graph_node_positions.keys():
+			var current_position: Vector2 = _graph_node_positions[node_id_value]
+			_graph_node_positions[node_id_value] = current_position + layout_offset
+	canvas_size = expanded_canvas
+	_graph_canvas_size = canvas_size
 	_keyword_graph_layout = _calculate_keyword_graph_layout(visible_nodes, canvas_size)
+	_active_path_transition_indices = _calculate_active_path_transition_indices(runtime_state.history_cursor)
 	var edges: Array[Dictionary] = _build_narrative_graph_edges(visible_nodes)
 	edges.append_array(_build_keyword_origin_edges())
 	edges.append_array(_build_keyword_connection_edges(visible_nodes))
 	edges.append_array(_build_keyword_candidate_edges(visible_nodes))
-	graph_canvas.configure(canvas_size, edges)
-	_graph_canvas_size = canvas_size
-	graph_zoom_container.custom_minimum_size = canvas_size * _graph_zoom
-	graph_zoom_container.size = canvas_size * _graph_zoom
-	graph_canvas.scale = Vector2.ONE * _graph_zoom
+	var screen_canvas_size := _graph_screen_vector(canvas_size)
+	graph_canvas.configure(screen_canvas_size, edges)
+	graph_zoom_container.custom_minimum_size = screen_canvas_size
+	graph_zoom_container.size = screen_canvas_size
+	graph_canvas.scale = Vector2.ONE
 
 	for node_value in visible_nodes.keys():
 		var node_id: String = str(node_value)
@@ -1898,11 +1923,12 @@ func _render_graph_view() -> void:
 		var keyword_unlocked: bool = runtime_state.is_keyword_unlocked(node_id)
 		graph_canvas.add_child(_graph_node_card(
 			node_data,
-			_graph_node_positions[node_id],
-			_graph_node_sizes[node_id],
+			_graph_screen_vector(_graph_node_positions[node_id]),
+			_graph_screen_vector(_graph_node_sizes[node_id]),
 			visited,
 			current,
-			keyword_unlocked
+			keyword_unlocked,
+			_graph_zoom
 		))
 
 	for layout_value in _keyword_graph_layout.values():
@@ -1912,9 +1938,11 @@ func _render_graph_view() -> void:
 		var keyword_layout: Dictionary = layout_value
 		graph_canvas.add_child(_keyword_graph_node(
 			keyword_layout.get("instance", {}),
-			keyword_layout.get("position", Vector2.ZERO),
-			keyword_layout.get("size", KEYWORD_GRAPH_MIN_SIZE)
+			_graph_screen_vector(keyword_layout.get("position", Vector2.ZERO)),
+			_graph_screen_vector(keyword_layout.get("size", KEYWORD_GRAPH_MIN_SIZE)),
+			_graph_zoom
 		))
+	_update_graph_grid()
 
 
 func _get_visible_graph_nodes() -> Dictionary:
@@ -2011,8 +2039,8 @@ func _calculate_keyword_graph_layout(
 
 
 func _build_narrative_graph_edges(visible_nodes: Dictionary) -> Array[Dictionary]:
-	var edges: Array[Dictionary] = []
-	var added_pairs: Dictionary = {}
+	var edge_by_pair: Dictionary = {}
+	var pair_order: Array[String] = []
 	for transition in runtime_state.committed_transitions:
 		var source_id := str(transition.get("source_node_id", ""))
 		var target_id := str(transition.get("target_node_id", ""))
@@ -2023,22 +2051,21 @@ func _build_narrative_graph_edges(visible_nodes: Dictionary) -> Array[Dictionary
 			continue
 		var pair_key := source_id + "->" + target_id
 		var style := _graph_edge_style(source_id, target_id, history_index)
-		if added_pairs.has(pair_key):
-			var prior_active := bool(added_pairs[pair_key])
-			var current_active: bool = not bool(style.get("dashed", false)) and style.get("color", C_MUTED) == C_BLUE
-			if not current_active or prior_active:
-				continue
-			for edge_index in range(edges.size()):
-				if str(edges[edge_index].get("source_id", "")) == source_id and str(edges[edge_index].get("target_id", "")) == target_id:
-					edges.remove_at(edge_index)
-					break
-		added_pairs[pair_key] = not bool(style.get("dashed", false)) and style.get("color", C_MUTED) == C_BLUE
-		edges.append(_make_graph_edge(
+		if edge_by_pair.has(pair_key) and int((edge_by_pair[pair_key] as Dictionary).get("style_priority", 0)) >= int(style.get("priority", 0)):
+			continue
+		if not edge_by_pair.has(pair_key):
+			pair_order.append(pair_key)
+		var edge := _make_graph_edge(
 			source_id, target_id,
 			_graph_node_positions[source_id], _graph_node_sizes[source_id],
 			_graph_node_positions[target_id], _graph_node_sizes[target_id], style
-		))
+		)
+		edge["style_priority"] = int(style.get("priority", 0))
+		edge_by_pair[pair_key] = edge
 
+	var edges: Array[Dictionary] = []
+	for pair_key in pair_order:
+		edges.append(edge_by_pair[pair_key])
 	return edges
 
 
@@ -2175,24 +2202,45 @@ func _graph_node_size_for(node_data: Dictionary) -> Vector2:
 
 
 func _graph_edge_style(source_id: String, target_id: String, history_index: int = -1) -> Dictionary:
-	var target_data: Dictionary = loader.get_node(target_id)
-	var icon_key := str(target_data.get("icon_key", ""))
-	var node_type := str(target_data.get("node_type", ""))
-	var is_error := icon_key in ["false", "fatal"] or node_type.contains("错误") or node_type.contains("失败")
-	if is_error:
-		return {"color": C_WARNING, "width": 1.0, "dashed": true}
-	if history_index >= _current_path_start_index() and history_index < runtime_state.history_cursor:
-		return {"color": C_BLUE, "width": 2.0, "dashed": false}
-	return {"color": C_MUTED, "width": 1.0, "dashed": true}
+	if _active_path_transition_indices.has(history_index):
+		return {"color": C_BLUE, "width": 2.0, "dashed": false, "priority": 3}
+	if _is_error_or_failure_node(source_id) or _is_error_or_failure_node(target_id):
+		return {"color": C_WARNING, "width": 1.0, "dashed": true, "priority": 2}
+	return {"color": C_MUTED, "width": 1.0, "dashed": true, "priority": 1}
 
 
-func _current_path_start_index() -> int:
-	for index in range(runtime_state.history_cursor - 1, -1, -1):
-		var node_data := loader.get_node(runtime_state.visit_history[index])
-		var choices: Variant = node_data.get("choices", [])
-		if choices is Array and (choices as Array).size() > 1:
-			return index
-	return 0
+func _calculate_active_path_transition_indices(cursor: int) -> Dictionary:
+	var active_indices: Dictionary = {}
+	if runtime_state.visit_history.is_empty() or cursor <= 0:
+		return active_indices
+	var node_stack: Array[String] = [runtime_state.visit_history[0]]
+	var edge_stack: Array[int] = []
+	var last_history_index := mini(cursor, runtime_state.visit_history.size() - 1)
+	for target_history_index in range(1, last_history_index + 1):
+		var transition_index := target_history_index - 1
+		var transition := runtime_state.get_committed_transition_at(transition_index)
+		if transition.is_empty():
+			continue
+		var target_id := runtime_state.visit_history[target_history_index]
+		var repeated_stack_index := node_stack.rfind(target_id)
+		if repeated_stack_index >= 0:
+			while node_stack.size() > repeated_stack_index + 1:
+				node_stack.pop_back()
+			while edge_stack.size() > repeated_stack_index:
+				edge_stack.pop_back()
+			continue
+		node_stack.append(target_id)
+		edge_stack.append(transition_index)
+	for transition_index in edge_stack:
+		active_indices[transition_index] = true
+	return active_indices
+
+
+func _is_error_or_failure_node(node_id: String) -> bool:
+	var node_data := loader.get_node(node_id)
+	var icon_key := str(node_data.get("icon_key", ""))
+	var node_type := str(node_data.get("node_type", ""))
+	return icon_key in ["false", "fatal"] or node_type.contains("错误") or node_type.contains("失败")
 
 
 func _make_graph_edge(
@@ -2204,8 +2252,8 @@ func _make_graph_edge(
 	target_size: Vector2,
 	style: Dictionary
 ) -> Dictionary:
-	var source_rect := Rect2(source_position, source_size)
-	var target_rect := Rect2(target_position, target_size)
+	var source_rect := Rect2(_graph_screen_vector(source_position), _graph_screen_vector(source_size))
+	var target_rect := Rect2(_graph_screen_vector(target_position), _graph_screen_vector(target_size))
 	var curve := PackedVector2Array()
 	var source_center := source_rect.get_center()
 	var target_center := target_rect.get_center()
@@ -2245,7 +2293,15 @@ func _make_graph_edge(
 	}
 
 
-func _keyword_graph_node(keyword_instance: Dictionary, position_value: Vector2, node_size: Vector2) -> Control:
+func _graph_screen_vector(world_value: Vector2) -> Vector2:
+	return Vector2(roundf(world_value.x * _graph_zoom), roundf(world_value.y * _graph_zoom))
+
+
+func _scaled_graph_metric(base_value: float, visual_scale: float) -> int:
+	return maxi(1, roundi(base_value * visual_scale))
+
+
+func _keyword_graph_node(keyword_instance: Dictionary, position_value: Vector2, node_size: Vector2, visual_scale: float) -> Control:
 	var keyword_text: String = str(keyword_instance.get("text", ""))
 	var instance_id: String = str(keyword_instance.get("instance_id", "keyword"))
 	var selected: bool = instance_id == _selected_keyword_instance_id
@@ -2271,38 +2327,38 @@ func _keyword_graph_node(keyword_instance: Dictionary, position_value: Vector2, 
 
 	var margin := MarginContainer.new()
 	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	margin.add_theme_constant_override("margin_left", 9)
-	margin.add_theme_constant_override("margin_right", 9)
-	margin.add_theme_constant_override("margin_top", 4)
-	margin.add_theme_constant_override("margin_bottom", 4)
+	margin.add_theme_constant_override("margin_left", _scaled_graph_metric(9.0, visual_scale))
+	margin.add_theme_constant_override("margin_right", _scaled_graph_metric(9.0, visual_scale))
+	margin.add_theme_constant_override("margin_top", _scaled_graph_metric(4.0, visual_scale))
+	margin.add_theme_constant_override("margin_bottom", _scaled_graph_metric(4.0, visual_scale))
 	panel.add_child(margin)
 
 	var row := HBoxContainer.new()
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	row.add_theme_constant_override("separation", 6)
+	row.add_theme_constant_override("separation", _scaled_graph_metric(6.0, visual_scale))
 	margin.add_child(row)
 
 	if _is_tutorial_case():
 		row.add_child(_icon(
 			_tutorial_icon("keyword", ICON_KEY_ROUND),
-			Vector2(17, 17),
+			Vector2.ONE * float(_scaled_graph_metric(17.0, visual_scale)),
 			text_color
 		))
 	else:
-		var diamond := _label("◇", 15, text_color, FONT_MONO_MEDIUM)
+		var diamond := _label("◇", _scaled_graph_metric(15.0, visual_scale), text_color, FONT_MONO_MEDIUM)
 		diamond.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		diamond.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		row.add_child(diamond)
 
 	if connected:
-		var connected_dot := _label("●", 9, text_color, FONT_MONO_MEDIUM)
+		var connected_dot := _label("●", _scaled_graph_metric(9.0, visual_scale), text_color, FONT_MONO_MEDIUM)
 		connected_dot.name = "ConnectedDot"
 		connected_dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		connected_dot.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		connected_dot.tooltip_text = "已连接"
 		row.add_child(connected_dot)
 
-	var text_label := _label(keyword_text, 14, text_color, FONT_SERIF_REGULAR)
+	var text_label := _label(keyword_text, _scaled_graph_metric(14.0, visual_scale), text_color, FONT_SERIF_REGULAR)
 	text_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	text_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	text_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -2323,7 +2379,8 @@ func _graph_node_card(
 	node_size: Vector2,
 	visited: bool,
 	current: bool,
-	keyword_unlocked: bool
+	keyword_unlocked: bool,
+	visual_scale: float
 ) -> Control:
 	var node_id: String = str(node_data.get("node_id", ""))
 	var icon_key: String = str(node_data.get("icon_key", ""))
@@ -2390,19 +2447,19 @@ func _graph_node_card(
 
 	var margin := MarginContainer.new()
 	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	margin.add_theme_constant_override("margin_left", 16)
-	margin.add_theme_constant_override("margin_right", 16)
-	margin.add_theme_constant_override("margin_top", 10)
-	margin.add_theme_constant_override("margin_bottom", 9)
+	margin.add_theme_constant_override("margin_left", _scaled_graph_metric(16.0, visual_scale))
+	margin.add_theme_constant_override("margin_right", _scaled_graph_metric(16.0, visual_scale))
+	margin.add_theme_constant_override("margin_top", _scaled_graph_metric(10.0, visual_scale))
+	margin.add_theme_constant_override("margin_bottom", _scaled_graph_metric(9.0, visual_scale))
 	_fill_rect(margin)
 	card.add_child(margin)
 
 	var content := VBoxContainer.new()
 	content.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	content.add_theme_constant_override("separation", 3)
+	content.add_theme_constant_override("separation", _scaled_graph_metric(3.0, visual_scale))
 	margin.add_child(content)
 
-	var title := _label(str(node_data.get("title", node_id)), 17, text_color, FONT_SERIF_SEMIBOLD)
+	var title := _label(str(node_data.get("title", node_id)), _scaled_graph_metric(17.0, visual_scale), text_color, FONT_SERIF_SEMIBOLD)
 	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -2426,7 +2483,7 @@ func _graph_node_card(
 	meta_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	content.add_child(meta_row)
 
-	var id_label := _label(node_id, 12, text_color, FONT_MONO_REGULAR)
+	var id_label := _label(node_id, _scaled_graph_metric(12.0, visual_scale), text_color, FONT_MONO_REGULAR)
 	id_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	meta_row.add_child(id_label)
 
@@ -2435,16 +2492,16 @@ func _graph_node_card(
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	meta_row.add_child(spacer)
 
-	var state_label := _label(state_text, 12, text_color, FONT_SERIF_REGULAR)
+	var state_label := _label(state_text, _scaled_graph_metric(12.0, visual_scale), text_color, FONT_SERIF_REGULAR)
 	state_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 	if locked:
-		meta_row.add_child(_icon(ICON_LOCK, Vector2(15, 15), text_color))
+		meta_row.add_child(_icon(ICON_LOCK, Vector2.ONE * float(_scaled_graph_metric(15.0, visual_scale)), text_color))
 
 	if _is_tutorial_case() and keyword_unlocked:
 		meta_row.add_child(_icon(
 			_tutorial_icon("unlock", ICON_KEY_ROUND),
-			Vector2(16, 16),
+			Vector2.ONE * float(_scaled_graph_metric(16.0, visual_scale)),
 			text_color
 		))
 
@@ -2546,6 +2603,7 @@ func _on_graph_keyword_pressed(instance_id: String) -> void:
 		)
 
 	_render_graph_view()
+	_refresh_operation_help()
 	_show_graph_status(
 		"已选择关键词：%s\n请选择要连接的剧情节点\nEsc 取消" % str(instance.get("text", "")),
 		true,
@@ -2760,6 +2818,14 @@ func _cancel_keyword_connection_selection(refresh_graph: bool) -> void:
 
 	if had_selection and refresh_graph and graph_view != null and graph_view.visible:
 		_render_graph_view()
+	if graph_view != null and graph_view.visible:
+		_refresh_operation_help()
+
+
+func _refresh_operation_help() -> void:
+	var current_data := loader.get_node(runtime_state.current_node_id)
+	if not current_data.is_empty():
+		_render_right_panel(current_data)
 
 
 func _show_graph_status(text: String, persistent: bool, icon_key: String = "") -> void:
@@ -3561,82 +3627,6 @@ func _node_summary(node_data: Dictionary) -> String:
 	return str(body)
 
 
-func _add_clue_ids(value: Variant, prefix: String, icon_texture: Texture2D) -> void:
-	if not (value is Array):
-		return
-
-	for clue_id in value:
-		clue_list.add_child(_clue_item(
-			icon_texture,
-			str(clue_id),
-			prefix + " · 已登记线索"
-		))
-
-
-func _build_graph_data(node_data: Dictionary) -> Dictionary:
-	var graph_nodes: Array = []
-	var edges: Array = []
-	var visible_nodes := _get_visible_graph_nodes()
-	var bounds := Rect2()
-	var has_bounds := false
-	for node_id_value in visible_nodes.keys():
-		var node_id := str(node_id_value)
-		if not _graph_node_positions.has(node_id):
-			continue
-		var rect := Rect2(_graph_node_positions[node_id], _graph_node_sizes.get(node_id, GRAPH_NODE_SIZE))
-		bounds = bounds.merge(rect) if has_bounds else rect
-		has_bounds = true
-	if not has_bounds:
-		bounds = Rect2(Vector2.ZERO, Vector2.ONE)
-	_mini_graph_bounds = bounds.grow(40.0)
-	var mini_area := Vector2(314.0, 172.0)
-	var scale_factor := minf(mini_area.x / _mini_graph_bounds.size.x, mini_area.y / _mini_graph_bounds.size.y)
-	var offset := Vector2(8.0, 8.0) + (mini_area - _mini_graph_bounds.size * scale_factor) * 0.5
-	var mini_positions: Dictionary = {}
-	for node_id_value in visible_nodes.keys():
-		var node_id := str(node_id_value)
-		if not _graph_node_positions.has(node_id):
-			continue
-		var node_rect := Rect2(_graph_node_positions[node_id], _graph_node_sizes.get(node_id, GRAPH_NODE_SIZE))
-		var mini_pos := offset + (node_rect.get_center() - _mini_graph_bounds.position) * scale_factor - Vector2(48.0, 11.5)
-		mini_positions[node_id] = mini_pos
-		var data := loader.get_node(node_id)
-		graph_nodes.append({
-			"title": _short_graph_title(str(data.get("title", node_id))),
-			"pos": mini_pos,
-			"active": node_id == runtime_state.current_node_id
-		})
-	var added_pairs: Dictionary = {}
-	for transition in runtime_state.committed_transitions:
-		var source_id := str(transition.get("source_node_id", ""))
-		var target_id := str(transition.get("target_node_id", ""))
-		if not mini_positions.has(source_id) or not mini_positions.has(target_id):
-			continue
-		var pair_key := source_id + "->" + target_id
-		if added_pairs.has(pair_key):
-			continue
-		added_pairs[pair_key] = true
-		var style := _graph_edge_style(source_id, target_id, int(transition.get("history_index", -1)))
-		edges.append({
-			"from": mini_positions[source_id] + Vector2(48.0, 11.5),
-			"to": mini_positions[target_id] + Vector2(48.0, 11.5),
-			"color": style.get("color", C_MUTED),
-			"width": style.get("width", 1.0)
-		})
-
-	return {
-		"nodes": graph_nodes,
-		"edges": edges
-	}
-
-
-func _short_graph_title(text: String) -> String:
-	if text.length() <= 8:
-		return text
-
-	return text.substr(0, 7) + "…"
-
-
 func _join_array(value: Variant) -> String:
 	if not (value is Array) or value.is_empty():
 		return "无"
@@ -4064,7 +4054,7 @@ func _render_layer_operation_help(title: String, description: String) -> void:
 	if clue_list == null:
 		return
 	_clear_children(clue_list)
-	clue_list.add_child(_clue_item(ICON_REFRESH_CW, title, description))
+	_add_operation_help("Esc", "返回游戏界面")
 
 
 func _hide_data_pages() -> void:
@@ -4171,6 +4161,7 @@ func _on_load_requested(slot_type: String, slot_index: int) -> void:
 	graph_view.visible = false
 	_set_nav_button_active(story_nav_button, true)
 	_set_nav_button_active(graph_nav_button, false)
+	_render_right_panel(loaded_node_data)
 	_show_case_status("存档读取成功")
 
 
@@ -4286,6 +4277,7 @@ func _show_history_cursor(index: int) -> void:
 	_set_nav_button_active(save_nav_button, false)
 	_set_nav_button_active(load_nav_button, false)
 	_set_nav_button_active(settings_nav_button, false)
+	_render_right_panel(node_data)
 
 
 func _show_story_view() -> void:
@@ -4336,30 +4328,51 @@ func _fit_graph_to_view() -> void:
 		bounds = Rect2(Vector2.ZERO, _graph_canvas_size)
 	bounds = bounds.grow(84.0)
 	var fit_zoom := minf(1.0, minf(viewport_size.x / bounds.size.x, viewport_size.y / bounds.size.y))
-	_set_graph_zoom(clampf(fit_zoom, 0.6, 1.7), viewport_size * 0.5)
+	_set_graph_zoom(clampf(fit_zoom, 0.6, 1.7), viewport_size * 0.5, false)
 	var centered_scroll := bounds.get_center() * _graph_zoom - viewport_size * 0.5
-	graph_scroll.scroll_horizontal = maxi(0, roundi(centered_scroll.x))
-	graph_scroll.scroll_vertical = maxi(0, roundi(centered_scroll.y))
+	_apply_graph_scroll_target(centered_scroll)
+	call_deferred("_apply_graph_scroll_target", centered_scroll)
 	_graph_has_fit = true
 	_sync_graph_view_to_runtime()
-	_update_mini_viewport_rect()
+	_update_graph_grid()
 
 
-func _set_graph_zoom(value: float, cursor_in_view: Vector2) -> void:
+func _set_graph_zoom(value: float, cursor_in_view: Vector2, preserve_cursor_anchor: bool = true) -> void:
 	var old_zoom := _graph_zoom
 	var new_zoom := clampf(value, 0.6, 1.7)
 	if is_equal_approx(old_zoom, new_zoom):
 		return
-	var content_point := (Vector2(graph_scroll.scroll_horizontal, graph_scroll.scroll_vertical) + cursor_in_view) / old_zoom
+	var world_before := (Vector2(graph_scroll.scroll_horizontal, graph_scroll.scroll_vertical) + cursor_in_view) / old_zoom
 	_graph_zoom = new_zoom
-	graph_canvas.scale = Vector2.ONE * _graph_zoom
-	graph_zoom_container.custom_minimum_size = _graph_canvas_size * _graph_zoom
-	graph_zoom_container.size = _graph_canvas_size * _graph_zoom
-	var target_scroll := content_point * _graph_zoom - cursor_in_view
+	_render_graph_view()
+	if preserve_cursor_anchor:
+		var target_scroll := world_before * new_zoom - cursor_in_view
+		_apply_graph_scroll_target(target_scroll)
+		call_deferred("_apply_graph_scroll_target", target_scroll)
+	_graph_has_fit = true
+	_sync_graph_view_to_runtime()
+	_update_graph_grid()
+
+
+func _apply_graph_scroll_target(target_scroll: Vector2) -> void:
+	if graph_scroll == null:
+		return
 	graph_scroll.scroll_horizontal = maxi(0, roundi(target_scroll.x))
 	graph_scroll.scroll_vertical = maxi(0, roundi(target_scroll.y))
-	_sync_graph_view_to_runtime()
-	call_deferred("_update_mini_viewport_rect")
+	_update_graph_grid()
+
+
+func _on_graph_scroll_value_changed(_value: float) -> void:
+	_update_graph_grid()
+
+
+func _update_graph_grid() -> void:
+	if graph_grid_background == null or graph_scroll == null:
+		return
+	graph_grid_background.configure(
+		_graph_zoom,
+		Vector2(graph_scroll.scroll_horizontal, graph_scroll.scroll_vertical)
+	)
 
 
 func _sync_graph_view_to_runtime() -> void:
@@ -4386,7 +4399,7 @@ func _apply_saved_graph_view() -> void:
 	var saved_view: Dictionary = runtime_state.graph_view
 	graph_scroll.scroll_horizontal = maxi(0, roundi(float(saved_view.get("pan_x", 0.0))))
 	graph_scroll.scroll_vertical = maxi(0, roundi(float(saved_view.get("pan_y", 0.0))))
-	_update_mini_viewport_rect()
+	_update_graph_grid()
 
 
 func _on_graph_canvas_gui_input(event: InputEvent) -> void:
@@ -4398,9 +4411,9 @@ func _on_graph_canvas_gui_input(event: InputEvent) -> void:
 			return
 		if mouse_event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN] and mouse_event.pressed:
 			var cursor_in_view := mouse_event.global_position - graph_scroll.global_position
-			var factor := 1.12 if mouse_event.button_index == MOUSE_BUTTON_WHEEL_UP else 1.0 / 1.12
+			var factor := 1.1 if mouse_event.button_index == MOUSE_BUTTON_WHEEL_UP else 1.0 / 1.1
 			_set_graph_zoom(_graph_zoom * factor, cursor_in_view)
-			graph_canvas.accept_event()
+			graph_scroll.accept_event()
 			return
 		if mouse_event.button_index == MOUSE_BUTTON_LEFT:
 			if mouse_event.pressed:
@@ -4411,7 +4424,7 @@ func _on_graph_canvas_gui_input(event: InputEvent) -> void:
 			else:
 				_graph_pan_active = false
 				_set_tutorial_cursor("default")
-			graph_canvas.accept_event()
+			graph_scroll.accept_event()
 
 
 func _set_center_view(show_graph: bool) -> void:
@@ -4430,12 +4443,10 @@ func _set_center_view(show_graph: bool) -> void:
 	_set_nav_button_active(load_nav_button, false)
 	_set_nav_button_active(settings_nav_button, false)
 
+	var current_data: Dictionary = loader.get_node(runtime_state.current_node_id)
+	if not current_data.is_empty():
+		_render_right_panel(current_data)
 	if show_graph:
-		var current_data: Dictionary = loader.get_node(runtime_state.current_node_id)
-
-		if not current_data.is_empty():
-			_render_right_panel(current_data)
-
 		call_deferred("_apply_scrollbar_styles")
 
 
@@ -4473,7 +4484,7 @@ func _scroll_graph_to_current() -> void:
 	elif _graph_node_positions.has(runtime_state.current_node_id):
 		var current_position: Vector2 = _graph_node_positions[runtime_state.current_node_id]
 		var current_size: Vector2 = _graph_node_sizes.get(runtime_state.current_node_id, GRAPH_NODE_SIZE)
-		var fallback_center: Vector2 = current_position + current_size * 0.5
+		var fallback_center: Vector2 = _graph_screen_vector(current_position + current_size * 0.5)
 		horizontal_target = fallback_center.x - viewport_size.x * GRAPH_CURRENT_ANCHOR.x
 		vertical_target = fallback_center.y - viewport_size.y * GRAPH_CURRENT_ANCHOR.y
 
@@ -4548,12 +4559,17 @@ func _choice_button(texture: Texture2D, title: String, desc: String, choice: Dic
 	desc_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	text_box.add_child(desc_label)
 
-	var arrow := _label("›", 28, choice_color, FONT_MONO_MEDIUM)
-	arrow.custom_minimum_size.x = 24
-	arrow.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	arrow.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	arrow.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	row.add_child(arrow)
+	if history_review:
+		var selected_badge := _small_framed_label("已选择", Vector2(62, 25), 13, C_MUTED, Color.TRANSPARENT, C_MUTED, 1, 2, FONT_SERIF_REGULAR)
+		selected_badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.add_child(selected_badge)
+	else:
+		var arrow := _label("›", 28, choice_color, FONT_MONO_MEDIUM)
+		arrow.custom_minimum_size.x = 24
+		arrow.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		arrow.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		arrow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.add_child(arrow)
 
 	var hit_button := _transparent_hit_button()
 	hit_button.focus_mode = Control.FOCUS_ALL
@@ -4575,158 +4591,45 @@ func _choice_button(texture: Texture2D, title: String, desc: String, choice: Dic
 	return root_control
 
 
-func _clue_item(texture: Texture2D, title: String, desc: String) -> Control:
-	var panel := PanelContainer.new()
-	panel.custom_minimum_size.y = 56
-	panel.add_theme_stylebox_override("panel", _style_box(Color.TRANSPARENT, C_BLUE, 1, 4))
+func _has_story_choice_controls() -> bool:
+	return choice_list != null and choice_list.get_child_count() > 0
 
-	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 12)
-	margin.add_theme_constant_override("margin_right", 10)
-	margin.add_theme_constant_override("margin_top", 7)
-	margin.add_theme_constant_override("margin_bottom", 7)
-	panel.add_child(margin)
 
+func _has_removable_keyword() -> bool:
+	for keyword_instance in runtime_state.get_keyword_instances():
+		if bool(runtime_state.can_remove_keyword(str(keyword_instance.get("instance_id", ""))).get("allowed", false)):
+			return true
+	return false
+
+
+func _add_operation_help(key_text: String, operation_text: String) -> void:
+	clue_list.add_child(_operation_help_row(key_text, operation_text))
+
+
+func _operation_help_row(key_text: String, operation_text: String) -> Control:
 	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 10)
-	margin.add_child(row)
+	row.custom_minimum_size.y = 32
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_theme_constant_override("separation", 12)
 
-	var icon_box := CenterContainer.new()
-	icon_box.custom_minimum_size.x = 26
-	icon_box.add_child(_icon(texture, Vector2(22, 22), C_BLUE))
-	row.add_child(icon_box)
+	var key_panel := PanelContainer.new()
+	key_panel.custom_minimum_size = Vector2(54, 30)
+	key_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	key_panel.add_theme_stylebox_override("panel", _style_box(C_WHITE, C_BLUE, 1, 2))
+	row.add_child(key_panel)
 
-	var text_box := VBoxContainer.new()
-	text_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	text_box.add_theme_constant_override("separation", 0)
-	row.add_child(text_box)
+	var key_label := _label(key_text, 13, C_BLUE, FONT_MONO_MEDIUM)
+	key_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	key_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	key_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	key_panel.add_child(key_label)
 
-	text_box.add_child(_label(title, 16, C_BLUE, FONT_SERIF_SEMIBOLD))
-	text_box.add_child(_label(desc, 13, C_SUBTEXT, FONT_SERIF_REGULAR))
-
-	var arrow := _label("›", 24, C_BLUE, FONT_MONO_MEDIUM)
-	arrow.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	row.add_child(arrow)
-
-	return panel
-
-
-func _mini_graph(graph_data: Dictionary) -> Control:
-	var panel := PanelContainer.new()
-	panel.custom_minimum_size.y = 188
-	panel.add_theme_stylebox_override("panel", _style_box(Color.TRANSPARENT, C_LINE, 1, 0))
-
-	var graph := Control.new()
-	graph.custom_minimum_size = Vector2(330, 188)
-	panel.add_child(graph)
-
-	var edges: Variant = graph_data.get("edges", [])
-
-	if edges is Array:
-		for edge in edges:
-			if edge is Dictionary:
-				graph.add_child(_line(edge.get("from", Vector2.ZERO), edge.get("to", Vector2.ZERO), edge.get("color", C_MUTED), int(edge.get("width", 1))))
-			elif edge is Array and edge.size() >= 2:
-				graph.add_child(_line(edge[0], edge[1], C_LINE, 1))
-
-	var nodes: Variant = graph_data.get("nodes", [])
-
-	if nodes is Array:
-		for node_data in nodes:
-			if not (node_data is Dictionary):
-				continue
-
-			graph.add_child(_graph_node(
-				str(node_data.get("title", "")),
-				node_data.get("pos", Vector2.ZERO),
-				bool(node_data.get("active", false))
-			))
-
-	mini_viewport_rect = PanelContainer.new()
-	mini_viewport_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	mini_viewport_rect.z_index = 20
-	mini_viewport_rect.add_theme_stylebox_override("panel", _style_box(Color.TRANSPARENT, C_BLUE, 1, 1))
-	graph.add_child(mini_viewport_rect)
-	call_deferred("_update_mini_viewport_rect")
-
-	return panel
-
-
-func _update_mini_viewport_rect() -> void:
-	if mini_viewport_rect == null or not is_instance_valid(mini_viewport_rect) or graph_scroll == null:
-		return
-	if _mini_graph_bounds.size.x <= 0.0 or _mini_graph_bounds.size.y <= 0.0:
-		mini_viewport_rect.visible = false
-		return
-	mini_viewport_rect.visible = true
-	var mini_area := Vector2(314.0, 172.0)
-	var scale_factor := minf(mini_area.x / _mini_graph_bounds.size.x, mini_area.y / _mini_graph_bounds.size.y)
-	var offset := Vector2(8.0, 8.0) + (mini_area - _mini_graph_bounds.size * scale_factor) * 0.5
-	var view_position := Vector2(graph_scroll.scroll_horizontal, graph_scroll.scroll_vertical) / _graph_zoom
-	var view_size := graph_scroll.size / _graph_zoom
-	mini_viewport_rect.position = offset + (view_position - _mini_graph_bounds.position) * scale_factor
-	mini_viewport_rect.size = Vector2(
-		minf(mini_area.x, view_size.x * scale_factor),
-		minf(mini_area.y, view_size.y * scale_factor)
-	)
-
-
-func _graph_node(text: String, pos: Variant, active: bool) -> Control:
-	var bg_color := C_BLUE if active else Color.TRANSPARENT
-	var border_color := C_BLUE_DARK if active else C_BLUE
-	var text_color := C_WHITE if active else C_BLUE
-
-	var node := _small_framed_label(text, Vector2(96, 23), 12, text_color, bg_color, border_color, 1, 2, FONT_SERIF_REGULAR)
-
-	if pos is Vector2:
-		node.position = pos
-	elif pos is Array and pos.size() >= 2:
-		node.position = Vector2(float(pos[0]), float(pos[1]))
-	else:
-		node.position = Vector2.ZERO
-
-	return node
-
-
-func _line(from_pos: Variant, to_pos: Variant, color: Color, width: int) -> Control:
-	var from_vec := Vector2.ZERO
-	var to_vec := Vector2.ZERO
-
-	if from_pos is Vector2:
-		from_vec = from_pos
-	elif from_pos is Array and from_pos.size() >= 2:
-		from_vec = Vector2(float(from_pos[0]), float(from_pos[1]))
-
-	if to_pos is Vector2:
-		to_vec = to_pos
-	elif to_pos is Array and to_pos.size() >= 2:
-		to_vec = Vector2(float(to_pos[0]), float(to_pos[1]))
-
-	var diff: Vector2 = to_vec - from_vec
-	var root_control := Control.new()
-	root_control.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var line := Line2D.new()
-	line.points = PackedVector2Array([from_vec, to_vec])
-	line.width = float(width)
-	line.default_color = color
-	line.antialiased = true
-	root_control.add_child(line)
-
-	if diff.length_squared() > 0.01:
-		var direction := diff.normalized()
-		var perpendicular := Vector2(-direction.y, direction.x)
-		var arrow_size := 5.0
-		var base := to_vec - direction * arrow_size
-		var arrow := Polygon2D.new()
-		arrow.polygon = PackedVector2Array([
-			to_vec,
-			base + perpendicular * arrow_size * 0.52,
-			base - perpendicular * arrow_size * 0.52
-		])
-		arrow.color = color
-		root_control.add_child(arrow)
-
-	return root_control
+	var operation_label := _label(operation_text, 14, C_SUBTEXT, FONT_SERIF_REGULAR)
+	operation_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	operation_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	operation_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	row.add_child(operation_label)
+	return row
 
 
 func _attr_row(left: String, key: String) -> Control:

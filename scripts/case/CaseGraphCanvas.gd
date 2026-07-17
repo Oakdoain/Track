@@ -1,7 +1,6 @@
 extends Control
 class_name CaseGraphCanvas
 
-const CANVAS_COLOR := Color("#F8F8F6")
 const DEFAULT_EDGE_COLOR := Color("#99ABE6")
 const DEFAULT_ARROW_SIZE := 7.0
 
@@ -19,8 +18,6 @@ func configure(
 
 
 func _draw() -> void:
-	draw_rect(Rect2(Vector2.ZERO, size), CANVAS_COLOR)
-
 	for edge in _edges:
 		_draw_edge(edge)
 
@@ -57,9 +54,10 @@ func _draw_edge(edge: Dictionary) -> void:
 
 func _sample_cubic(start: Vector2, control_a: Vector2, control_b: Vector2, finish: Vector2) -> PackedVector2Array:
 	var result := PackedVector2Array()
-	const SEGMENTS := 28
-	for index in range(SEGMENTS + 1):
-		var t := float(index) / float(SEGMENTS)
+	var control_length := start.distance_to(control_a) + control_a.distance_to(control_b) + control_b.distance_to(finish)
+	var segment_count := clampi(ceili(control_length / 18.0), 24, 96)
+	for index in range(segment_count + 1):
+		var t := float(index) / float(segment_count)
 		var inverse := 1.0 - t
 		result.append(
 			inverse * inverse * inverse * start

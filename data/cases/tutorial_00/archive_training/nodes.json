@@ -82,7 +82,7 @@
 			"choices": [
 				{
 					"title": "返回调查枢纽",
-					"desc": "继续选择要检查的位置。",
+					"desc": "沿此前选择的调查路径继续。",
 					"to": "tutorial_0003"
 				}
 			],
@@ -107,7 +107,7 @@
 			"choices": [
 				{
 					"title": "返回调查枢纽",
-					"desc": "继续检查档案。",
+					"desc": "沿此前选择的调查路径继续。",
 					"to": "tutorial_0003"
 				}
 			],
@@ -136,7 +136,7 @@
 			"choices": [
 				{
 					"title": "返回调查枢纽",
-					"desc": "保留封口记录，继续检查档案。",
+					"desc": "沿此前选择的调查路径继续。",
 					"to": "tutorial_0003"
 				}
 			],
@@ -165,7 +165,7 @@
 			"choices": [
 				{
 					"title": "返回调查枢纽",
-					"desc": "记录证据损失，继续检查档案。",
+					"desc": "沿此前选择的调查路径继续。",
 					"to": "tutorial_0003"
 				}
 			],
@@ -189,31 +189,31 @@
 			"choices": [
 				{
 					"title": "查看档案封面",
-					"desc": "确认编号与用途，不改变封口状态。",
+					"desc": "先确认档案的编号与基本信息。",
 					"to": "tutorial_0002a",
 					"requires_flags": {"tutorial_cover_checked": false}
 				},
 				{
-					"title": "检查档案袋封口",
-					"desc": "在拆封前观察并记录原始封口。",
+					"title": "检查档案袋外观",
+					"desc": "从档案袋外部开始检查。",
 					"to": "tutorial_0002c",
 					"requires_flags": {"tutorial_bag_opened": false, "tutorial_seal_checked": false}
 				},
 				{
-					"title": "检查档案袋封口",
-					"desc": "档案袋已拆开，只能记录原始封口证据已损失。",
+					"title": "检查档案袋外观",
+					"desc": "从档案袋外部开始检查。",
 					"to": "tutorial_0002d",
 					"requires_flags": {"tutorial_bag_opened": true, "tutorial_seal_checked": false}
 				},
 				{
-					"title": "拆开档案袋",
-					"desc": "打开档案袋；原始封口状态将无法恢复。",
+					"title": "打开档案袋",
+					"desc": "查看袋内保存的材料。",
 					"to": "tutorial_0002b",
 					"requires_flags": {"tutorial_bag_opened": false}
 				},
 				{
 					"title": "查看封存登记",
-					"desc": "档案袋已打开，可以比对登记与袋内材料。",
+					"desc": "阅读档案入库时留下的记录。",
 					"to": "tutorial_0005",
 					"requires_flags": {"tutorial_bag_opened": true}
 				}
@@ -310,8 +310,8 @@
 			"audio_clues": [], "text_clues": ["clue_tutorial_archive_id"], "room_refs": [],
 			"choices": [
 				{
-					"title": "复核封口异常",
-					"desc": "使用拆封前记录的原始封口证据补充结论。",
+					"title": "补充复核材料",
+					"desc": "继续检查尚未纳入结论的材料。",
 					"to": "tutorial_0007s",
 					"requires_flags": {
 						"tutorial_page_connection_completed": true,
@@ -323,7 +323,7 @@
 				},
 				{
 					"title": "形成完整复核结论",
-					"desc": "页码与原始封口证据均已建立永久连接。",
+					"desc": "整理已经建立的永久连接并形成结论。",
 					"to": "tutorial_0009a",
 					"requires_flags": {
 						"tutorial_page_connection_completed": true,
@@ -334,7 +334,7 @@
 				},
 				{
 					"title": "形成保留意见结论",
-					"desc": "确认页码缺口，并对无法核实的封口状态保留意见。",
+					"desc": "根据当前已核实内容形成结论。",
 					"to": "tutorial_0009b",
 					"requires_flags": {
 						"tutorial_page_connection_completed": true,
