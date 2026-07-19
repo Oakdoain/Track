@@ -40,6 +40,10 @@ func migrate_document(data: Dictionary) -> Dictionary:
 		runtime["committed_transitions"] = []
 	if not runtime.has("graph_view"):
 		runtime["graph_view"] = {"pan_x": 0.0, "pan_y": 0.0, "zoom": 1.0}
+	if not runtime.has("discovered_contacts"):
+		runtime["discovered_contacts"] = ["assistant"]
+	if not runtime.has("active_call"):
+		runtime["active_call"] = {}
 	migrated["runtime_state"] = runtime
 	migrated["format_version"] = SUPPORTED_FORMAT_VERSION
 	return {

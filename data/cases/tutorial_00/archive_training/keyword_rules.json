@@ -10,6 +10,25 @@
 			{"keyword": "封口白痕", "anchor_text": "封口白痕", "occurrence_index": 0}
 		]
 	},
+	"keyword_effects": [
+		{
+			"keyword_id": "contact_police",
+			"text": "警察联络处",
+			"source_scope": [
+				"phone_transcript"
+			],
+			"effects": [
+				{
+					"type": "discover_keyword",
+					"keyword_id": "contact_police"
+				},
+				{
+					"type": "add_contact",
+					"contact_id": "police_contact"
+				}
+			]
+		}
+	],
 	"keyword_rules": [
 		{
 			"keyword": "页码缺口",

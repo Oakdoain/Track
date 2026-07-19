@@ -13,6 +13,9 @@ const GraphGridBackgroundScript := preload("res://scripts/case/GraphGridBackgrou
 const NarrativeGraphLayoutScript := preload("res://scripts/case/NarrativeGraphLayout.gd")
 const KenneyAssetCatalog := preload("res://scripts/ui/KenneyAssetCatalog.gd")
 const TutorialModalScript := preload("res://scripts/ui/TutorialModal.gd")
+const PhoneManagerScript := preload("res://scripts/phone/PhoneManager.gd")
+const ContactsViewScript := preload("res://scripts/ui/ContactsView.gd")
+const PhoneCallViewScript := preload("res://scripts/ui/PhoneCallView.gd")
 const SaveUIScene := preload("res://scenes/ui/SaveUI.tscn")
 const LoadUIScene := preload("res://scenes/ui/LoadUI.tscn")
 
@@ -186,6 +189,16 @@ var attr_location_value: Label
 var attr_character_value: Label
 var attr_autosave_value: Label
 
+var phone_manager: PhoneManager
+var right_tab_bar: HBoxContainer
+var node_info_tab_button: Button
+var contacts_tab_button: Button
+var call_transcript_tab_button: Button
+var node_info_view: Control
+var contacts_view: ContactsView
+var phone_call_view: PhoneCallView
+var _active_right_tab: String = "node_info"
+
 var case_status_panel: PanelContainer
 var case_status_label: Label
 var _case_status_generation: int = 0
@@ -260,6 +273,9 @@ func _ready() -> void:
 			_initialization_error if _initialization_error != "" else "案件初始化失败"
 		)
 		return
+	if not _setup_phone_system():
+		initialization_failed.emit("电话数据加载失败")
+		return
 
 	initialization_succeeded.emit()
 	call_deferred("_force_self_to_viewport")
@@ -273,13 +289,15 @@ func _exit_tree() -> void:
 		cursor_manager.call("deactivate_tutorial")
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	var viewport_size: Vector2 = get_viewport_rect().size
 
 	if viewport_size != _last_viewport_size:
 		_force_self_to_viewport()
 
 	_refresh_audio_progress_display()
+	if phone_manager != null:
+		phone_manager.update(delta)
 
 
 func _input(event: InputEvent) -> void:
@@ -362,6 +380,15 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if event.is_action_pressed("ui_confirm"):
+		if (
+			phone_manager != null
+			and phone_call_view != null
+			and phone_call_view.visible
+			and str(phone_manager.get_active_call().get("status", "")) == "incoming_waiting"
+		):
+			_on_phone_answer_pressed()
+			get_viewport().set_input_as_handled()
+			return
 		var focus_owner := get_viewport().gui_get_focus_owner()
 		if focus_owner is BaseButton:
 			(focus_owner as BaseButton).pressed.emit()
@@ -907,13 +934,46 @@ func _build_right_panel() -> Control:
 	panel.name = "RightPanel"
 	panel.add_theme_stylebox_override("panel", _style_box(C_BG, C_DIVIDER, 1, 0))
 
+	var right_root := VBoxContainer.new()
+	right_root.name = "RightPanelRoot"
+	right_root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	right_root.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	right_root.add_theme_constant_override("separation", 0)
+	panel.add_child(right_root)
+
+	right_tab_bar = HBoxContainer.new()
+	right_tab_bar.name = "RightTabBar"
+	right_tab_bar.custom_minimum_size.y = 48
+	right_tab_bar.add_theme_constant_override("separation", 0)
+	right_root.add_child(right_tab_bar)
+
+	node_info_tab_button = _right_tab_button("节点信息", "node_info")
+	node_info_tab_button.name = "NodeInfoTabButton"
+	right_tab_bar.add_child(node_info_tab_button)
+	contacts_tab_button = _right_tab_button("电话簿", "contacts")
+	contacts_tab_button.name = "ContactsTabButton"
+	right_tab_bar.add_child(contacts_tab_button)
+	call_transcript_tab_button = _right_tab_button("通话记录", "call")
+	call_transcript_tab_button.name = "CallTranscriptTabButton"
+	call_transcript_tab_button.visible = false
+	right_tab_bar.add_child(call_transcript_tab_button)
+
+	var content := Control.new()
+	content.name = "RightTabContent"
+	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	content.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	right_root.add_child(content)
+
 	var scroll := ScrollContainer.new()
 	scroll.name = "RightPanelScroll"
+	scroll.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	panel.add_child(scroll)
+	content.add_child(scroll)
+	node_info_view = scroll
+	node_info_view.name = "NodeInfoView"
 
 	var margin := MarginContainer.new()
 	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -997,7 +1057,196 @@ func _build_right_panel() -> Control:
 	box.add_child(_attr_row("相关角色", "character"))
 	box.add_child(_attr_row("存档状态", "autosave"))
 
+	contacts_view = ContactsViewScript.new() as ContactsView
+	contacts_view.name = "ContactsView"
+	contacts_view.visible = false
+	content.add_child(contacts_view)
+	contacts_view.contact_pressed.connect(_on_phone_contact_pressed)
+
+	phone_call_view = PhoneCallViewScript.new() as PhoneCallView
+	phone_call_view.name = "CallTranscriptView"
+	phone_call_view.visible = false
+	content.add_child(phone_call_view)
+	phone_call_view.answer_pressed.connect(_on_phone_answer_pressed)
+	phone_call_view.reject_pressed.connect(_on_phone_reject_pressed)
+	phone_call_view.choice_pressed.connect(_on_phone_choice_pressed)
+	phone_call_view.keyword_pressed.connect(_on_phone_keyword_pressed)
+
+	_set_right_tab("node_info")
+
 	return panel
+
+
+func _right_tab_button(text: String, tab_id: String) -> Button:
+	var button := Button.new()
+	button.text = text
+	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	button.custom_minimum_size.y = 48
+	button.add_theme_font_override("font", FONT_SERIF_REGULAR)
+	button.add_theme_font_size_override("font_size", 14)
+	button.pressed.connect(_set_right_tab.bind(tab_id))
+	return button
+
+
+func _set_right_tab(tab_id: String) -> void:
+	if tab_id == "call" and (call_transcript_tab_button == null or not call_transcript_tab_button.visible):
+		tab_id = "node_info"
+	_active_right_tab = tab_id
+	if node_info_view != null:
+		node_info_view.visible = tab_id == "node_info"
+	if contacts_view != null:
+		contacts_view.visible = tab_id == "contacts"
+	if phone_call_view != null:
+		phone_call_view.visible = tab_id == "call"
+		if tab_id == "call":
+			phone_call_view.request_scroll_to_bottom()
+	for entry in [
+		{"button": node_info_tab_button, "id": "node_info"},
+		{"button": contacts_tab_button, "id": "contacts"},
+		{"button": call_transcript_tab_button, "id": "call"}
+	]:
+		var button: Button = entry.get("button")
+		if button == null:
+			continue
+		var active := str(entry.get("id", "")) == tab_id
+		var normal_text_color := C_WHITE if active else C_BLUE
+		button.add_theme_color_override("font_color", normal_text_color)
+		button.add_theme_color_override("font_hover_color", C_WHITE if active else C_BLUE)
+		button.add_theme_color_override("font_pressed_color", C_WHITE)
+		button.add_theme_color_override("font_focus_color", C_WHITE if active else C_BLUE)
+		button.add_theme_color_override("font_disabled_color", C_MUTED)
+		button.add_theme_stylebox_override("normal", _style_box(C_BLUE if active else C_BG, C_BLUE, 1, 0))
+		button.add_theme_stylebox_override("hover", _style_box(C_BLUE_ACTIVE if active else C_PANEL_SOFT, C_BLUE, 1, 0))
+		button.add_theme_stylebox_override("pressed", _style_box(C_BLUE_DARK, C_BLUE_DARK, 1, 0))
+		button.add_theme_stylebox_override("focus", _style_box(C_BLUE_ACTIVE if active else C_PANEL_SOFT, C_BLUE, 2, 0))
+
+
+func _setup_phone_system() -> bool:
+	phone_manager = PhoneManagerScript.new() as PhoneManager
+	phone_manager.state_changed.connect(_sync_phone_ui)
+	phone_manager.call_ended.connect(_on_phone_call_ended)
+	if not phone_manager.configure(loader, runtime_state):
+		return false
+	_sync_phone_ui()
+	if phone_manager.has_visible_call():
+		_set_right_tab("call")
+	elif phone_manager.begin_available_incoming_call():
+		_set_right_tab("call")
+	return true
+
+
+func _sync_phone_ui() -> void:
+	if phone_manager == null:
+		return
+	if contacts_view != null:
+		contacts_view.set_contacts(phone_manager.get_discovered_contact_data())
+	var active_call := phone_manager.get_active_call()
+	var has_call := not active_call.is_empty()
+	if call_transcript_tab_button != null:
+		call_transcript_tab_button.visible = has_call
+	if has_call:
+		phone_call_view.render_call(active_call, phone_manager.get_contact(str(active_call.get("contact_id", ""))))
+	else:
+		phone_call_view.clear_call()
+		if _active_right_tab == "call":
+			_set_right_tab("node_info")
+	_refresh_current_goal()
+
+
+func _on_phone_answer_pressed() -> void:
+	_play_tutorial_ui_sound("ui_click")
+	phone_manager.answer_incoming_call()
+
+
+func _on_phone_reject_pressed() -> void:
+	_play_tutorial_ui_sound("ui_click")
+	phone_manager.reject_current_call()
+
+
+func _on_phone_choice_pressed(choice_id: String) -> void:
+	_play_tutorial_ui_sound("ui_click")
+	phone_manager.choose(choice_id)
+
+
+func _on_phone_contact_pressed(contact_id: String) -> void:
+	if phone_manager.request_outgoing_call(contact_id):
+		_set_right_tab("call")
+
+
+func _on_phone_keyword_pressed(
+	keyword_id: String,
+	keyword: String,
+	_message_id: String,
+	_local_position: Vector2
+) -> void:
+	var result := _record_keyword_from_source(
+		keyword,
+		runtime_state.current_node_id,
+		"phone_transcript",
+		keyword_id
+	)
+	if not bool(result.get("valid", false)):
+		push_warning("MainUI: rejected phone transcript keyword: %s (%s)" % [keyword, str(result.get("reason", ""))])
+		return
+	_refresh_keyword_grid()
+	_render_graph_view()
+	_refresh_current_goal()
+	_sync_phone_ui()
+	phone_manager.notify_keyword_completed(keyword_id)
+	var feedback := "已记录关键词：" + keyword
+	if bool(result.get("contact_added", false)):
+		feedback += "\n联系人已加入电话簿"
+	_show_case_status(feedback)
+	_play_tutorial_ui_sound("ui_keyword_extract")
+
+
+func _record_keyword_from_source(
+	keyword: String,
+	source_node_id: String,
+	source_scope: String,
+	keyword_id: String = ""
+) -> Dictionary:
+	var effect_rule: Dictionary = (
+		loader.get_keyword_effect(keyword_id)
+		if keyword_id != ""
+		else loader.find_keyword_effect(keyword, source_scope)
+	)
+	if keyword_id != "":
+		var scopes: Variant = effect_rule.get("source_scope", [])
+		if effect_rule.is_empty() or str(effect_rule.get("keyword", "")) != keyword or not (scopes is Array) or not (scopes as Array).has(source_scope):
+			return {"valid": false, "reason": "keyword_effect_mismatch"}
+	var add_result := runtime_state.add_keyword(keyword, source_node_id)
+	var reason := str(add_result.get("reason", ""))
+	if not bool(add_result.get("added", false)) and reason != "duplicate":
+		return {"valid": false, "reason": reason}
+	var contact_added := false
+	if not effect_rule.is_empty():
+		for effect_value in effect_rule.get("effects", []):
+			if not (effect_value is Dictionary):
+				continue
+			var effect: Dictionary = effect_value
+			match str(effect.get("type", "")):
+				"discover_keyword":
+					pass
+				"add_contact":
+					contact_added = runtime_state.add_discovered_contact(str(effect.get("contact_id", ""))) or contact_added
+	return {
+		"valid": true,
+		"added": bool(add_result.get("added", false)),
+		"duplicate": reason == "duplicate",
+		"contact_added": contact_added
+	}
+
+
+func _on_phone_call_ended(next_node_id: String) -> void:
+	phone_call_view.clear_call()
+	_set_right_tab("node_info")
+	if next_node_id == "":
+		return
+	if loader.get_node(next_node_id).is_empty():
+		push_error("MainUI: phone call completion node does not exist: " + next_node_id)
+		return
+	_show_node(next_node_id)
 
 
 func _initialize_case_for_startup() -> bool:
@@ -1149,10 +1398,11 @@ func _render_tutorial_hints(node_data: Dictionary) -> void:
 
 	match node_id:
 		"tutorial_0000":
-			_queue_tutorial_modal_once("audio_controls", [
-				{"prompt": "mouse_left", "text": "鼠标左键：播放这段音频"},
-				{"prompt": "mouse_drag", "text": "按住鼠标左键：拖动播放线调整位置"}
-			])
+			if bool(runtime_state.flags.get("tutorial_assistant_call_completed", false)):
+				_queue_tutorial_modal_once("audio_controls", [
+					{"prompt": "mouse_left", "text": "鼠标左键：播放这段音频"},
+					{"prompt": "mouse_drag", "text": "按住鼠标左键：拖动播放线调整位置"}
+				])
 		"tutorial_0003":
 			_queue_tutorial_modal_once("backtrack", [
 				{"prompt": "mouse_left", "text": "鼠标左键：点击顶部“回溯”返回上一条记录"}
@@ -1258,6 +1508,13 @@ func _show_save_error_modal() -> void:
 
 func _current_goal_for_node(node_data: Dictionary) -> String:
 	var configured_goal: String = str(node_data.get("current_goal", loader.get_current_goal()))
+	if (
+		runtime_state != null
+		and str(runtime_state.active_call.get("waiting_for_keyword", "")) != ""
+	):
+		return "从通话内容中记录一个联系人。"
+	if runtime_state != null and str(runtime_state.active_call.get("status", "")) == "active":
+		return "完成当前通话。"
 
 	if not _is_tutorial_case():
 		return configured_goal
@@ -1504,12 +1761,16 @@ func _on_story_keyword_meta_clicked(meta_value: Variant) -> void:
 
 		return
 
-	var result: Dictionary = runtime_state.add_keyword(keyword, source_node_id)
+	var result: Dictionary = _record_keyword_from_source(
+		keyword,
+		source_node_id,
+		"story_body"
+	)
 
-	if not bool(result.get("added", false)):
+	if not bool(result.get("valid", false)) or not bool(result.get("added", false)):
 		var reason: String = str(result.get("reason", ""))
 
-		if reason == "duplicate":
+		if bool(result.get("duplicate", false)):
 			_show_keyword_popup(keyword, true, popup_position)
 			return
 
@@ -4150,6 +4411,9 @@ func _on_load_requested(slot_type: String, slot_index: int) -> void:
 	if not runtime_state.apply_save_dictionary(runtime_data):
 		_report_load_failure("应用存档运行状态失败")
 		return
+	if phone_manager != null:
+		phone_manager.refresh_after_runtime_restore()
+		phone_call_view.clear_call()
 
 	_normalize_tutorial_investigation_flags()
 	_prepare_graph_view_from_runtime()
@@ -4162,6 +4426,12 @@ func _on_load_requested(slot_type: String, slot_index: int) -> void:
 	_set_nav_button_active(story_nav_button, true)
 	_set_nav_button_active(graph_nav_button, false)
 	_render_right_panel(loaded_node_data)
+	if phone_manager != null:
+		_sync_phone_ui()
+		if phone_manager.has_visible_call():
+			_set_right_tab("call")
+		elif phone_manager.begin_available_incoming_call():
+			_set_right_tab("call")
 	_show_case_status("存档读取成功")
 
 

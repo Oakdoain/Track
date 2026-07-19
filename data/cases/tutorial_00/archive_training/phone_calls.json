@@ -1,0 +1,119 @@
+{
+	"calls": [
+		{
+			"id": "tutorial_assistant_opening",
+			"contact_id": "assistant",
+			"direction": "incoming",
+			"entry_message_id": "assistant_call_001",
+			"completion_node_id": "tutorial_0001",
+			"reject_retry_flag": "tutorial_assistant_call_retry_available",
+			"start_conditions": {
+				"case_id": "tutorial_00",
+				"node_id": "tutorial_0000",
+				"forbidden_flags": [
+					"tutorial_assistant_call_completed"
+				]
+			}
+		}
+	],
+	"messages": [
+		{
+			"id": "assistant_call_001",
+			"speaker": "assistant",
+			"text": "你总算醒了。",
+			"choices": [
+				{
+					"id": "ask_time",
+					"text": "现在几点了？",
+					"next": "assistant_call_002a"
+				},
+				{
+					"id": "complain_wakeup",
+					"text": "你打电话就是为了叫醒我？",
+					"next": "assistant_call_002b"
+				}
+			]
+		},
+		{
+			"id": "assistant_call_002a",
+			"speaker": "assistant",
+			"text": "下午两点十七分。",
+			"next": "assistant_call_003"
+		},
+		{
+			"id": "assistant_call_002b",
+			"speaker": "assistant",
+			"text": "要只是叫醒你，我会让电话多响一会儿。",
+			"next": "assistant_call_003"
+		},
+		{
+			"id": "assistant_call_003",
+			"speaker": "assistant",
+			"text": "我不是来提醒你作息的。",
+			"next": "assistant_call_003b"
+		},
+		{
+			"id": "assistant_call_003b",
+			"speaker": "assistant",
+			"text": "你桌上有一份编号 T-00 的训练档案。",
+			"next": "assistant_call_004"
+		},
+		{
+			"id": "assistant_call_004",
+			"speaker": "assistant",
+			"text": "封存登记写的是三页，但档案室复核时发现，里面的材料可能对不上。",
+			"next": "assistant_call_005"
+		},
+		{
+			"id": "assistant_call_005",
+			"speaker": "assistant",
+			"text": "先确认发生了什么。不要一开始就猜是谁做的。",
+			"choices": [
+				{
+					"id": "ask_what_to_check",
+					"text": "我需要检查什么？",
+					"next": "assistant_call_006"
+				}
+			]
+		},
+		{
+			"id": "assistant_call_006",
+			"speaker": "assistant",
+			"text": "档案袋本身、封存登记，还有袋内材料。调查顺序由你决定。",
+			"next": "assistant_call_007"
+		},
+		{
+			"id": "assistant_call_007",
+			"speaker": "assistant",
+			"text": "另外，你的通讯名单还是空的。以后正式案件需要封锁现场时，要联系警察联络处。",
+			"keywords": [
+				{
+					"keyword_id": "contact_police",
+					"text": "警察联络处",
+					"occurrence_index": 0
+				}
+			],
+			"wait_for_keyword": "contact_police",
+			"next": "assistant_call_008"
+		},
+		{
+			"id": "assistant_call_008",
+			"speaker": "assistant",
+			"text": "查完以后，从电话簿打给我。只汇报你真正能够证明的部分。",
+			"choices": [
+				{
+					"id": "inspect_archive_first",
+					"text": "我先检查档案。",
+					"end_call": true,
+					"effects": [
+						{
+							"type": "set_flag",
+							"flag_id": "tutorial_assistant_call_completed",
+							"value": true
+						}
+					]
+				}
+			]
+		}
+	]
+}

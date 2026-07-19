@@ -12,6 +12,7 @@ var nodes_by_id: Dictionary = {}
 var graph_layout: Dictionary = {}
 var keyword_rules: Array[Dictionary] = []
 var keyword_presets: Dictionary = {}
+var keyword_effects: Array[Dictionary] = []
 var registered_cases: Array[Dictionary] = []
 var current_case_descriptor: Dictionary = {}
 var case_metadata: Dictionary = {}
@@ -138,6 +139,7 @@ func load_case(case_id: String, slice_id: String) -> bool:
 	graph_layout = candidate.graph_layout.duplicate(true)
 	keyword_rules = candidate.keyword_rules.duplicate(true)
 	keyword_presets = candidate.keyword_presets.duplicate(true)
+	keyword_effects = candidate.keyword_effects.duplicate(true)
 	case_metadata = metadata_candidate.duplicate(true)
 	current_case_descriptor = descriptor.duplicate(true)
 	clues_data = clues_candidate.duplicate(true)
@@ -151,6 +153,10 @@ func get_current_case_id() -> String:
 
 func get_current_slice_id() -> String:
 	return str(current_case_descriptor.get("slice_id", case_metadata.get("slice_id", "")))
+
+
+func get_case_data_path() -> String:
+	return str(current_case_descriptor.get("data_path", ""))
 
 
 func get_case_metadata() -> Dictionary:
@@ -171,6 +177,28 @@ func get_nodes() -> Array[Dictionary]:
 
 func get_keyword_rules() -> Array[Dictionary]:
 	return keyword_rules.duplicate(true)
+
+
+func get_keyword_effects() -> Array[Dictionary]:
+	return keyword_effects.duplicate(true)
+
+
+func get_keyword_effect(keyword_id: String) -> Dictionary:
+	for effect_rule in keyword_effects:
+		if str(effect_rule.get("keyword_id", "")) == keyword_id:
+			return effect_rule.duplicate(true)
+	return {}
+
+
+func find_keyword_effect(keyword: String, source_scope: String) -> Dictionary:
+	var normalized := _normalize_keyword(keyword)
+	for effect_rule in keyword_effects:
+		if str(effect_rule.get("normalized_keyword", "")) != normalized:
+			continue
+		var scopes: Variant = effect_rule.get("source_scope", [])
+		if scopes is Array and (scopes as Array).has(source_scope):
+			return effect_rule.duplicate(true)
+	return {}
 
 
 func get_graph_layout() -> Dictionary:
@@ -337,6 +365,7 @@ func get_graph_node_position(node_id: String) -> Vector2:
 func load_keyword_rules(path: String = DEFAULT_KEYWORD_RULES_PATH) -> bool:
 	keyword_rules.clear()
 	keyword_presets.clear()
+	keyword_effects.clear()
 
 	if not FileAccess.file_exists(path):
 		push_warning("CaseDataLoader: keyword rules file not found: " + path)
@@ -360,6 +389,7 @@ func load_keyword_rules(path: String = DEFAULT_KEYWORD_RULES_PATH) -> bool:
 		return false
 
 	_parse_keyword_presets(parsed.get("keyword_presets", {}))
+	_parse_keyword_effects(parsed.get("keyword_effects", []))
 
 	var raw_rules: Variant = parsed.get("keyword_rules", [])
 
@@ -384,6 +414,52 @@ func load_keyword_rules(path: String = DEFAULT_KEYWORD_RULES_PATH) -> bool:
 		push_warning("CaseDataLoader: no actionable keyword connection rules were loaded.")
 
 	return true
+
+
+func _parse_keyword_effects(raw_effects: Variant) -> void:
+	if not (raw_effects is Array):
+		push_warning("CaseDataLoader: keyword_effects must be an Array.")
+		return
+	var seen_ids: Dictionary = {}
+	for raw_rule in (raw_effects as Array):
+		if not (raw_rule is Dictionary):
+			push_warning("CaseDataLoader: ignored non-Dictionary keyword effect rule.")
+			continue
+		var rule: Dictionary = raw_rule
+		var keyword_id := str(rule.get("keyword_id", ""))
+		var keyword := str(rule.get("text", rule.get("keyword", "")))
+		var scopes_value: Variant = rule.get("source_scope", [])
+		var effects_value: Variant = rule.get("effects", [])
+		if keyword_id == "" or keyword == "" or seen_ids.has(keyword_id):
+			push_warning("CaseDataLoader: ignored incomplete or duplicate keyword effect: " + keyword_id)
+			continue
+		if not (scopes_value is Array) or (scopes_value as Array).is_empty() or not (effects_value is Array) or (effects_value as Array).is_empty():
+			push_warning("CaseDataLoader: keyword effect requires source_scope and effects arrays: " + keyword_id)
+			continue
+		var scopes: Array[String] = []
+		var valid := true
+		for scope_value in (scopes_value as Array):
+			if not (scope_value is String) or str(scope_value) == "":
+				valid = false
+				break
+			scopes.append(str(scope_value))
+		var normalized_effects: Array[Dictionary] = []
+		for effect_value in (effects_value as Array):
+			if not (effect_value is Dictionary) or str((effect_value as Dictionary).get("type", "")) == "":
+				valid = false
+				break
+			normalized_effects.append((effect_value as Dictionary).duplicate(true))
+		if not valid:
+			push_warning("CaseDataLoader: ignored invalid keyword effect: " + keyword_id)
+			continue
+		seen_ids[keyword_id] = true
+		keyword_effects.append({
+			"keyword_id": keyword_id,
+			"keyword": keyword,
+			"normalized_keyword": _normalize_keyword(keyword),
+			"source_scope": scopes,
+			"effects": normalized_effects
+		})
 
 
 func get_keyword_presets(node_id: String) -> Array[Dictionary]:
@@ -713,6 +789,7 @@ func _clear_loaded_case() -> void:
 	graph_layout.clear()
 	keyword_rules.clear()
 	keyword_presets.clear()
+	keyword_effects.clear()
 	current_case_descriptor.clear()
 	case_metadata.clear()
 	clues_data.clear()

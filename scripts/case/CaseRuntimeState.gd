@@ -14,6 +14,8 @@ var visit_history: Array[String] = []
 var committed_transitions: Array[Dictionary] = []
 var history_cursor: int = -1
 var graph_view: Dictionary = {"pan_x": 0.0, "pan_y": 0.0, "zoom": 1.0}
+var discovered_contacts: Array[String] = ["assistant"]
+var active_call: Dictionary = {}
 
 var _keyword_instances_by_key: Dictionary = {}
 var _keyword_counts_by_source: Dictionary = {}
@@ -398,8 +400,22 @@ func to_save_dictionary() -> Dictionary:
 		"visit_history": visit_history.duplicate(),
 		"committed_transitions": committed_transitions.duplicate(true),
 		"history_cursor": history_cursor,
-		"graph_view": graph_view.duplicate(true)
+		"graph_view": graph_view.duplicate(true),
+		"discovered_contacts": discovered_contacts.duplicate(),
+		"active_call": active_call.duplicate(true)
 	}
+
+
+func add_discovered_contact(contact_id: String) -> bool:
+	var normalized_id := contact_id.strip_edges()
+	if normalized_id == "" or discovered_contacts.has(normalized_id):
+		return false
+	discovered_contacts.append(normalized_id)
+	return true
+
+
+func has_discovered_contact(contact_id: String) -> bool:
+	return discovered_contacts.has(contact_id)
 
 
 func validate_save_dictionary(data: Dictionary, emit_warning: bool = true) -> bool:
@@ -579,6 +595,42 @@ func validate_save_dictionary_detailed(data: Dictionary, root_path: String = "ru
 	if float((graph_value as Dictionary).get("zoom", 1.0)) <= 0.0:
 		return _validation_failure(root_path + ".graph_view.zoom", "number > 0", (graph_value as Dictionary).get("zoom"), "graph zoom must be positive")
 
+	var contacts_value: Variant = data.get("discovered_contacts", ["assistant"])
+	if not (contacts_value is Array):
+		return _validation_failure(root_path + ".discovered_contacts", "Array<String>", contacts_value, "discovered contacts container is invalid")
+	var contact_ids: Dictionary = {}
+	for contact_index in range((contacts_value as Array).size()):
+		var contact_value: Variant = (contacts_value as Array)[contact_index]
+		if not (contact_value is String) or str(contact_value) == "" or contact_ids.has(str(contact_value)):
+			return _validation_failure("%s.discovered_contacts[%d]" % [root_path, contact_index], "unique non-empty String", contact_value, "contact id is invalid or duplicated")
+		contact_ids[str(contact_value)] = true
+
+	var call_value: Variant = data.get("active_call", {})
+	if not (call_value is Dictionary):
+		return _validation_failure(root_path + ".active_call", "Dictionary", call_value, "active call container is invalid")
+	var saved_call: Dictionary = call_value
+	if not saved_call.is_empty():
+		for string_field in ["call_id", "contact_id", "direction", "status", "message_id", "waiting_for_keyword"]:
+			if not (saved_call.get(string_field, "") is String):
+				return _validation_failure(root_path + ".active_call." + string_field, "String", saved_call.get(string_field), "active call text field is invalid")
+		if str(saved_call.get("call_id", "")) == "" or str(saved_call.get("contact_id", "")) == "":
+			return _validation_failure(root_path + ".active_call", "call_id/contact_id as non-empty Strings", saved_call, "active call identity is incomplete")
+		if str(saved_call.get("status", "")) not in ["incoming_waiting", "active"]:
+			return _validation_failure(root_path + ".active_call.status", "incoming_waiting or active", saved_call.get("status"), "active call status is invalid")
+		for array_field in ["transcript", "choices_made", "presented_choices"]:
+			if not (saved_call.get(array_field, []) is Array):
+				return _validation_failure(root_path + ".active_call." + array_field, "Array", saved_call.get(array_field), "active call list is invalid")
+		if not (saved_call.get("is_waiting_message", false) is bool):
+			return _validation_failure(root_path + ".active_call.is_waiting_message", "bool", saved_call.get("is_waiting_message"), "message scheduling flag is invalid")
+		if not (saved_call.get("pending_message_id", "") is String):
+			return _validation_failure(root_path + ".active_call.pending_message_id", "String", saved_call.get("pending_message_id"), "pending message id is invalid")
+		for delay_field in ["transcript_delay_elapsed", "transcript_delay_total"]:
+			var delay_value: Variant = saved_call.get(delay_field, 0.0)
+			if not _is_finite_number(delay_value) or float(delay_value) < 0.0:
+				return _validation_failure(root_path + ".active_call." + delay_field, "finite number >= 0", delay_value, "message scheduling delay is invalid")
+		if float(saved_call.get("transcript_delay_elapsed", 0.0)) > float(saved_call.get("transcript_delay_total", 0.0)):
+			return _validation_failure(root_path + ".active_call.transcript_delay_elapsed", "number <= transcript_delay_total", saved_call.get("transcript_delay_elapsed"), "message scheduling elapsed time exceeds total delay")
+
 	return {"valid": true, "status": "available", "error": ""}
 
 
@@ -638,6 +690,15 @@ func apply_save_dictionary(data: Dictionary) -> bool:
 		"pan_y": float((graph_value as Dictionary).get("pan_y", 0.0)),
 		"zoom": float((graph_value as Dictionary).get("zoom", 1.0))
 	}
+	discovered_contacts.clear()
+	var saved_contacts: Variant = data.get("discovered_contacts", ["assistant"])
+	for contact_value in (saved_contacts as Array):
+		var contact_id := str(contact_value)
+		if contact_id != "" and not discovered_contacts.has(contact_id):
+			discovered_contacts.append(contact_id)
+	if not discovered_contacts.has("assistant"):
+		discovered_contacts.push_front("assistant")
+	active_call = (data.get("active_call", {}) as Dictionary).duplicate(true)
 	_rebuild_runtime_indexes()
 	return true
 
@@ -654,6 +715,8 @@ func reset_runtime_state() -> void:
 	committed_transitions.clear()
 	history_cursor = -1
 	graph_view = {"pan_x": 0.0, "pan_y": 0.0, "zoom": 1.0}
+	discovered_contacts = ["assistant"]
+	active_call.clear()
 	_issued_keyword_ids.clear()
 	_rebuild_runtime_indexes()
 
