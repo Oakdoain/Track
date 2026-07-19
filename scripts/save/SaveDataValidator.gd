@@ -44,6 +44,19 @@ func migrate_document(data: Dictionary) -> Dictionary:
 		runtime["discovered_contacts"] = ["assistant"]
 	if not runtime.has("active_call"):
 		runtime["active_call"] = {}
+	if not runtime.has("revealed_node_ids"):
+		var legacy_history_value: Variant = runtime.get("visit_history", [])
+		runtime["revealed_node_ids"] = (legacy_history_value as Array).duplicate() if legacy_history_value is Array else []
+	if not runtime.has("active_text_reveal"):
+		runtime["active_text_reveal"] = {}
+	if not runtime.has("completed_after_reveal_events"):
+		runtime["completed_after_reveal_events"] = []
+	if not runtime.has("case_state"):
+		runtime["case_state"] = {}
+	if not runtime.has("history_snapshots"):
+		runtime["history_snapshots"] = []
+	if not runtime.has("active_transition_indices"):
+		runtime["active_transition_indices"] = []
 	migrated["runtime_state"] = runtime
 	migrated["format_version"] = SUPPORTED_FORMAT_VERSION
 	return {
@@ -132,6 +145,15 @@ func _validate_node_references(runtime_data: Dictionary) -> Dictionary:
 		var node_id := str(history[index])
 		if loader.get_node(node_id).is_empty() and not _is_legacy_compatible_node(node_id):
 			return _failure("corrupted", "runtime_state.visit_history[%d]: target node does not exist, value=%s" % [index, node_id])
+	var revealed_nodes: Array = runtime_data.get("revealed_node_ids", history)
+	for index in range(revealed_nodes.size()):
+		var node_id := str(revealed_nodes[index])
+		if loader.get_node(node_id).is_empty() and not _is_legacy_compatible_node(node_id):
+			return _failure("corrupted", "runtime_state.revealed_node_ids[%d]: target node does not exist, value=%s" % [index, node_id])
+	var active_reveal: Dictionary = runtime_data.get("active_text_reveal", {})
+	var active_reveal_node_id := str(active_reveal.get("node_id", ""))
+	if active_reveal_node_id != "" and loader.get_node(active_reveal_node_id).is_empty() and not _is_legacy_compatible_node(active_reveal_node_id):
+		return _failure("corrupted", "runtime_state.active_text_reveal.node_id: target node does not exist, value=%s" % active_reveal_node_id)
 	var transitions: Array = runtime_data.get("committed_transitions", [])
 	for index in range(transitions.size()):
 		var transition := transitions[index] as Dictionary

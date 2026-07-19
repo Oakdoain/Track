@@ -17,6 +17,7 @@ var _bubble: PanelContainer
 var _text_label: RichTextLabel
 var _text: String = ""
 var _message_id: String = ""
+var _reveal_completed: bool = true
 
 
 func configure(entry: Dictionary) -> void:
@@ -44,7 +45,7 @@ func configure(entry: Dictionary) -> void:
 	_text_label.bbcode_enabled = false
 	_text_label.fit_content = true
 	_text_label.scroll_active = false
-	_text_label.selection_enabled = true
+	_text_label.selection_enabled = false
 	_text_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_text_label.custom_minimum_size.y = 22
 	_text_label.add_theme_font_override("normal_font", FONT_SERIF_REGULAR)
@@ -53,6 +54,10 @@ func configure(entry: Dictionary) -> void:
 	_text_label.meta_clicked.connect(_on_meta_clicked)
 	padding.add_child(_text_label)
 	_append_text(entry.get("keywords", []))
+	set_reveal_progress(
+		int(entry.get("visible_characters", _text.length())),
+		bool(entry.get("reveal_completed", true))
+	)
 	if not is_player:
 		add_child(_expanding_spacer())
 	resized.connect(_update_bubble_width)
@@ -61,6 +66,17 @@ func configure(entry: Dictionary) -> void:
 
 func get_maximum_bubble_width() -> float:
 	return floorf(size.x * MAX_WIDTH_RATIO)
+
+
+func set_reveal_progress(visible_characters: int, completed: bool) -> bool:
+	if _text_label == null:
+		return false
+	var target := -1 if completed else clampi(visible_characters, 0, _text.length())
+	var changed := _text_label.visible_characters != target or _reveal_completed != completed
+	_reveal_completed = completed
+	_text_label.visible_characters = target
+	_text_label.selection_enabled = completed
+	return changed
 
 
 func _update_bubble_width() -> void:
@@ -111,6 +127,8 @@ func _append_text(keywords_value: Variant) -> void:
 
 
 func _on_meta_clicked(meta_value: Variant) -> void:
+	if not _reveal_completed:
+		return
 	if not (meta_value is String):
 		return
 	var meta := str(meta_value)

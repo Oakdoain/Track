@@ -16,6 +16,23 @@ var history_cursor: int = -1
 var graph_view: Dictionary = {"pan_x": 0.0, "pan_y": 0.0, "zoom": 1.0}
 var discovered_contacts: Array[String] = ["assistant"]
 var active_call: Dictionary = {}
+var revealed_node_ids: Array[String] = []
+var active_text_reveal: Dictionary = {}
+var completed_after_reveal_events: Array[String] = []
+var case_state: Dictionary = {}
+var history_snapshots: Array[Dictionary] = []
+var active_transition_indices: Array[int] = []
+
+const NON_REWINDABLE_FLAG_IDS := {
+	"tutorial_assistant_call_completed": true,
+	"tutorial_backtrack_learned": true,
+	"inspect_bag_option_unlocked": true,
+	"tutorial_backtrack_hint_shown": true,
+	"tutorial_keyword_popup_shown": true,
+	"tutorial_keyword_popup_open": true,
+	"tutorial_keyword_recording_learned": true,
+	"tutorial_glue_mark_recorded": true
+}
 
 var _keyword_instances_by_key: Dictionary = {}
 var _keyword_counts_by_source: Dictionary = {}
@@ -36,8 +53,11 @@ func set_current_node(node_id: String, autosave: bool) -> void:
 func initialize_visit_history(node_id: String) -> void:
 	visit_history.clear()
 	committed_transitions.clear()
+	history_snapshots.clear()
+	active_transition_indices.clear()
 	if node_id != "":
 		visit_history.append(node_id)
+		history_snapshots.append({})
 		history_cursor = 0
 	else:
 		history_cursor = -1
@@ -48,18 +68,54 @@ func commit_transition(source_node_id: String, target_node_id: String, choice_ke
 		return false
 	if visit_history.is_empty():
 		initialize_visit_history(source_node_id)
-	if history_cursor != visit_history.size() - 1 or visit_history[history_cursor] != source_node_id:
+	if history_cursor < 0 or history_cursor >= visit_history.size() or visit_history[history_cursor] != source_node_id:
 		return false
+	if history_cursor != visit_history.size() - 1:
+		# Keep the old branch as immutable history. A new branch begins with a
+		# duplicate source entry at the end; this is a navigation jump, not a
+		# narrative edge, so no transition is created for it.
+		var branch_snapshot := _make_rewind_snapshot()
+		visit_history.append(source_node_id)
+		history_snapshots.append(branch_snapshot)
+		history_cursor = visit_history.size() - 1
 
+	var transition_index := history_cursor
 	committed_transitions.append({
 		"source_node_id": source_node_id,
 		"target_node_id": target_node_id,
 		"choice_key": choice_key,
-		"history_index": history_cursor
+		"history_index": transition_index
 	})
 	visit_history.append(target_node_id)
+	history_snapshots.append({})
 	history_cursor = visit_history.size() - 1
+	if not active_transition_indices.has(transition_index):
+		active_transition_indices.append(transition_index)
 	return true
+
+
+func capture_history_snapshot(index: int = history_cursor) -> void:
+	if index < 0 or index >= visit_history.size():
+		return
+	while history_snapshots.size() < visit_history.size():
+		history_snapshots.append({})
+	history_snapshots[index] = _make_rewind_snapshot()
+
+
+func restore_history_snapshot(index: int) -> bool:
+	if index < 0 or index >= visit_history.size():
+		return false
+	history_cursor = index
+	current_node_id = visit_history[index]
+	if index < history_snapshots.size() and not history_snapshots[index].is_empty():
+		_apply_rewind_snapshot(history_snapshots[index])
+	else:
+		active_transition_indices = _infer_active_transition_indices(index)
+	return true
+
+
+func get_active_transition_indices() -> Array[int]:
+	return active_transition_indices.duplicate()
 
 
 func is_reviewing_history() -> bool:
@@ -76,16 +132,14 @@ func get_committed_transition_at(index: int) -> Dictionary:
 func move_history_cursor(delta: int) -> String:
 	if visit_history.is_empty():
 		return ""
-	history_cursor = clampi(history_cursor + delta, 0, visit_history.size() - 1)
-	current_node_id = visit_history[history_cursor]
+	restore_history_snapshot(clampi(history_cursor + delta, 0, visit_history.size() - 1))
 	return current_node_id
 
 
 func move_history_cursor_to_node(node_id: String) -> String:
 	for index in range(visit_history.size() - 1, -1, -1):
 		if visit_history[index] == node_id:
-			history_cursor = index
-			current_node_id = node_id
+			restore_history_snapshot(index)
 			return node_id
 	return ""
 
@@ -402,8 +456,95 @@ func to_save_dictionary() -> Dictionary:
 		"history_cursor": history_cursor,
 		"graph_view": graph_view.duplicate(true),
 		"discovered_contacts": discovered_contacts.duplicate(),
-		"active_call": active_call.duplicate(true)
+		"active_call": active_call.duplicate(true),
+		"revealed_node_ids": revealed_node_ids.duplicate(),
+		"active_text_reveal": active_text_reveal.duplicate(true),
+		"completed_after_reveal_events": completed_after_reveal_events.duplicate(),
+		"case_state": case_state.duplicate(true),
+		"history_snapshots": history_snapshots.duplicate(true),
+		"active_transition_indices": active_transition_indices.duplicate()
 	}
+
+
+func set_persistent_flag(flag_id: String, value: bool = true) -> void:
+	if flag_id != "":
+		flags[flag_id] = value
+
+
+func set_case_state_values(values: Dictionary) -> void:
+	for key_value in values.keys():
+		var key := str(key_value)
+		if key != "":
+			case_state[key] = values[key_value]
+
+
+func _make_rewind_snapshot() -> Dictionary:
+	return {
+		"flags": flags.duplicate(true),
+		"case_state": case_state.duplicate(true),
+		"unlocked_nodes": unlocked_nodes.duplicate(true),
+		"last_safe_autosave_node_id": last_safe_autosave_node_id,
+		"keyword_instances": keyword_instances.duplicate(true),
+		"keyword_connections": keyword_connections.duplicate(true),
+		"keyword_unlocked_nodes": keyword_unlocked_nodes.duplicate(true),
+		"active_transition_indices": active_transition_indices.duplicate()
+	}
+
+
+func _apply_rewind_snapshot(snapshot: Dictionary) -> void:
+	var permanent_values: Dictionary = {}
+	for flag_value in flags.keys():
+		var flag_id := str(flag_value)
+		if _is_non_rewindable_flag(flag_id):
+			permanent_values[flag_id] = flags[flag_value]
+	flags = (snapshot.get("flags", {}) as Dictionary).duplicate(true)
+	for flag_id in permanent_values.keys():
+		flags[flag_id] = permanent_values[flag_id]
+	case_state = (snapshot.get("case_state", {}) as Dictionary).duplicate(true)
+	unlocked_nodes = (snapshot.get("unlocked_nodes", {}) as Dictionary).duplicate(true)
+	last_safe_autosave_node_id = str(snapshot.get("last_safe_autosave_node_id", ""))
+	keyword_instances = (snapshot.get("keyword_instances", []) as Array).duplicate(true)
+	keyword_connections = (snapshot.get("keyword_connections", []) as Array).duplicate(true)
+	keyword_unlocked_nodes = (snapshot.get("keyword_unlocked_nodes", {}) as Dictionary).duplicate(true)
+	active_transition_indices.clear()
+	for index_value in (snapshot.get("active_transition_indices", []) as Array):
+		active_transition_indices.append(int(index_value))
+	_rebuild_runtime_indexes()
+
+
+func _is_non_rewindable_flag(flag_id: String) -> bool:
+	return (
+		NON_REWINDABLE_FLAG_IDS.has(flag_id)
+		or flag_id.begins_with("tutorial_hint_seen_")
+		or flag_id.begins_with("failure_hint_seen_")
+	)
+
+
+func _infer_active_transition_indices(cursor: int) -> Array[int]:
+	var result: Array[int] = []
+	var node_stack: Array[String] = []
+	var edge_stack: Array[int] = []
+	if visit_history.is_empty() or cursor < 0:
+		return result
+	node_stack.append(visit_history[0])
+	for target_history_index in range(1, mini(cursor, visit_history.size() - 1) + 1):
+		var transition_index := target_history_index - 1
+		var transition := get_committed_transition_at(transition_index)
+		if transition.is_empty():
+			# A missing edge denotes a branch jump back to this historical node.
+			var branch_node := visit_history[target_history_index]
+			var branch_stack_index := node_stack.rfind(branch_node)
+			if branch_stack_index >= 0:
+				while node_stack.size() > branch_stack_index + 1:
+					node_stack.pop_back()
+				while edge_stack.size() > branch_stack_index:
+					edge_stack.pop_back()
+			continue
+		node_stack.append(visit_history[target_history_index])
+		edge_stack.append(transition_index)
+	for edge_index in edge_stack:
+		result.append(edge_index)
+	return result
 
 
 func add_discovered_contact(contact_id: String) -> bool:
@@ -416,6 +557,28 @@ func add_discovered_contact(contact_id: String) -> bool:
 
 func has_discovered_contact(contact_id: String) -> bool:
 	return discovered_contacts.has(contact_id)
+
+
+func mark_node_revealed(node_id: String) -> bool:
+	if node_id == "" or revealed_node_ids.has(node_id):
+		return false
+	revealed_node_ids.append(node_id)
+	return true
+
+
+func is_node_revealed(node_id: String) -> bool:
+	return revealed_node_ids.has(node_id)
+
+
+func mark_after_reveal_event_completed(event_id: String) -> bool:
+	if event_id == "" or completed_after_reveal_events.has(event_id):
+		return false
+	completed_after_reveal_events.append(event_id)
+	return true
+
+
+func is_after_reveal_event_completed(event_id: String) -> bool:
+	return completed_after_reveal_events.has(event_id)
 
 
 func validate_save_dictionary(data: Dictionary, emit_warning: bool = true) -> bool:
@@ -630,6 +793,77 @@ func validate_save_dictionary_detailed(data: Dictionary, root_path: String = "ru
 				return _validation_failure(root_path + ".active_call." + delay_field, "finite number >= 0", delay_value, "message scheduling delay is invalid")
 		if float(saved_call.get("transcript_delay_elapsed", 0.0)) > float(saved_call.get("transcript_delay_total", 0.0)):
 			return _validation_failure(root_path + ".active_call.transcript_delay_elapsed", "number <= transcript_delay_total", saved_call.get("transcript_delay_elapsed"), "message scheduling elapsed time exceeds total delay")
+		for optional_string_field in ["revealing_message_id", "voice_profile_id", "pending_choice_next", "pending_choice_id"]:
+			if not (saved_call.get(optional_string_field, "") is String):
+				return _validation_failure(root_path + ".active_call." + optional_string_field, "String", saved_call.get(optional_string_field), "phone reveal text field is invalid")
+		for optional_bool_field in ["message_reveal_completed", "pending_choice_end_call"]:
+			if not (saved_call.get(optional_bool_field, false) is bool):
+				return _validation_failure(root_path + ".active_call." + optional_bool_field, "bool", saved_call.get(optional_bool_field), "phone reveal flag is invalid")
+		for optional_integer_field in ["revealing_transcript_index", "message_visible_characters"]:
+			var integer_value: Variant = saved_call.get(optional_integer_field, -1 if optional_integer_field == "revealing_transcript_index" else 0)
+			if not _is_integer_number(integer_value) or int(integer_value) < (-1 if optional_integer_field == "revealing_transcript_index" else 0):
+				return _validation_failure(root_path + ".active_call." + optional_integer_field, "integer in valid reveal range", integer_value, "phone reveal position is invalid")
+		var reveal_elapsed_value: Variant = saved_call.get("message_reveal_elapsed", 0.0)
+		if not _is_finite_number(reveal_elapsed_value) or float(reveal_elapsed_value) < 0.0:
+			return _validation_failure(root_path + ".active_call.message_reveal_elapsed", "finite number >= 0", reveal_elapsed_value, "phone reveal elapsed time is invalid")
+		if not (saved_call.get("pending_choice_effects", []) is Array):
+			return _validation_failure(root_path + ".active_call.pending_choice_effects", "Array", saved_call.get("pending_choice_effects"), "pending choice effects are invalid")
+
+	var revealed_value: Variant = data.get("revealed_node_ids", data.get("visit_history", []))
+	if not (revealed_value is Array):
+		return _validation_failure(root_path + ".revealed_node_ids", "Array<String>", revealed_value, "revealed node container is invalid")
+	var revealed_ids: Dictionary = {}
+	for revealed_index in range((revealed_value as Array).size()):
+		var revealed_id_value: Variant = (revealed_value as Array)[revealed_index]
+		if not (revealed_id_value is String) or str(revealed_id_value) == "" or revealed_ids.has(str(revealed_id_value)):
+			return _validation_failure("%s.revealed_node_ids[%d]" % [root_path, revealed_index], "unique non-empty String", revealed_id_value, "revealed node id is invalid or duplicated")
+		revealed_ids[str(revealed_id_value)] = true
+
+	var reveal_state_value: Variant = data.get("active_text_reveal", {})
+	if not (reveal_state_value is Dictionary):
+		return _validation_failure(root_path + ".active_text_reveal", "Dictionary", reveal_state_value, "active text reveal state is invalid")
+	var reveal_state: Dictionary = reveal_state_value
+	if not reveal_state.is_empty():
+		if not (reveal_state.get("node_id", "") is String) or str(reveal_state.get("node_id", "")) == "":
+			return _validation_failure(root_path + ".active_text_reveal.node_id", "non-empty String", reveal_state.get("node_id"), "active reveal node is invalid")
+		for reveal_integer_field in ["section_index", "visible_characters"]:
+			var reveal_integer_value: Variant = reveal_state.get(reveal_integer_field, 0)
+			if not _is_integer_number(reveal_integer_value) or int(reveal_integer_value) < 0:
+				return _validation_failure(root_path + ".active_text_reveal." + reveal_integer_field, "integer >= 0", reveal_integer_value, "active reveal position is invalid")
+		for reveal_number_field in ["character_elapsed", "post_reveal_elapsed", "post_delay_total"]:
+			var reveal_number_value: Variant = reveal_state.get(reveal_number_field, 0.0)
+			if not _is_finite_number(reveal_number_value) or float(reveal_number_value) < 0.0:
+				return _validation_failure(root_path + ".active_text_reveal." + reveal_number_field, "finite number >= 0", reveal_number_value, "active reveal timer is invalid")
+		for reveal_bool_field in ["completed", "waiting_after_reveal", "events_completed"]:
+			if not (reveal_state.get(reveal_bool_field, false) is bool):
+				return _validation_failure(root_path + ".active_text_reveal." + reveal_bool_field, "bool", reveal_state.get(reveal_bool_field), "active reveal flag is invalid")
+
+	var completed_events_value: Variant = data.get("completed_after_reveal_events", [])
+	if not (completed_events_value is Array):
+		return _validation_failure(root_path + ".completed_after_reveal_events", "Array<String>", completed_events_value, "completed event container is invalid")
+	var completed_event_ids: Dictionary = {}
+	for event_index in range((completed_events_value as Array).size()):
+		var event_value: Variant = (completed_events_value as Array)[event_index]
+		if not (event_value is String) or str(event_value) == "" or completed_event_ids.has(str(event_value)):
+			return _validation_failure("%s.completed_after_reveal_events[%d]" % [root_path, event_index], "unique non-empty String", event_value, "completed event id is invalid or duplicated")
+		completed_event_ids[str(event_value)] = true
+
+	if not (data.get("case_state", {}) is Dictionary):
+		return _validation_failure(root_path + ".case_state", "Dictionary", data.get("case_state"), "rewindable case state is invalid")
+	var snapshots_value: Variant = data.get("history_snapshots", [])
+	if not (snapshots_value is Array):
+		return _validation_failure(root_path + ".history_snapshots", "Array<Dictionary>", snapshots_value, "history snapshots are invalid")
+	if not (snapshots_value as Array).is_empty() and (snapshots_value as Array).size() != raw_history.size():
+		return _validation_failure(root_path + ".history_snapshots", "empty or aligned with visit_history", snapshots_value, "history snapshots are not aligned")
+	for snapshot_index in range((snapshots_value as Array).size()):
+		if not ((snapshots_value as Array)[snapshot_index] is Dictionary):
+			return _validation_failure("%s.history_snapshots[%d]" % [root_path, snapshot_index], "Dictionary", (snapshots_value as Array)[snapshot_index], "history snapshot is invalid")
+	var active_indices_value: Variant = data.get("active_transition_indices", [])
+	if not (active_indices_value is Array):
+		return _validation_failure(root_path + ".active_transition_indices", "Array<int>", active_indices_value, "active path indices are invalid")
+	for active_value in (active_indices_value as Array):
+		if not _is_integer_number(active_value) or int(active_value) < 0:
+			return _validation_failure(root_path + ".active_transition_indices", "non-negative integer entries", active_value, "active path index is invalid")
 
 	return {"valid": true, "status": "available", "error": ""}
 
@@ -699,6 +933,34 @@ func apply_save_dictionary(data: Dictionary) -> bool:
 	if not discovered_contacts.has("assistant"):
 		discovered_contacts.push_front("assistant")
 	active_call = (data.get("active_call", {}) as Dictionary).duplicate(true)
+	revealed_node_ids.clear()
+	var saved_revealed: Variant = data.get("revealed_node_ids", visit_history)
+	for node_value in (saved_revealed as Array):
+		var revealed_id := str(node_value)
+		if revealed_id != "" and not revealed_node_ids.has(revealed_id):
+			revealed_node_ids.append(revealed_id)
+	active_text_reveal = (data.get("active_text_reveal", {}) as Dictionary).duplicate(true)
+	completed_after_reveal_events.clear()
+	for event_value in (data.get("completed_after_reveal_events", []) as Array):
+		var event_id := str(event_value)
+		if event_id != "" and not completed_after_reveal_events.has(event_id):
+			completed_after_reveal_events.append(event_id)
+	case_state = (data.get("case_state", {}) as Dictionary).duplicate(true)
+	history_snapshots.clear()
+	var saved_snapshots: Variant = data.get("history_snapshots", [])
+	if saved_snapshots is Array and not (saved_snapshots as Array).is_empty():
+		for snapshot_value in (saved_snapshots as Array):
+			history_snapshots.append((snapshot_value as Dictionary).duplicate(true))
+	else:
+		for _history_entry in visit_history:
+			history_snapshots.append({})
+	active_transition_indices.clear()
+	var saved_active_indices: Variant = data.get("active_transition_indices", [])
+	if saved_active_indices is Array and not (saved_active_indices as Array).is_empty():
+		for index_value in (saved_active_indices as Array):
+			active_transition_indices.append(int(index_value))
+	else:
+		active_transition_indices = _infer_active_transition_indices(history_cursor)
 	_rebuild_runtime_indexes()
 	return true
 
@@ -717,6 +979,12 @@ func reset_runtime_state() -> void:
 	graph_view = {"pan_x": 0.0, "pan_y": 0.0, "zoom": 1.0}
 	discovered_contacts = ["assistant"]
 	active_call.clear()
+	revealed_node_ids.clear()
+	active_text_reveal.clear()
+	completed_after_reveal_events.clear()
+	case_state.clear()
+	history_snapshots.clear()
+	active_transition_indices.clear()
 	_issued_keyword_ids.clear()
 	_rebuild_runtime_indexes()
 

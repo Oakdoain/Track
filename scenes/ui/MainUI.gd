@@ -16,6 +16,8 @@ const TutorialModalScript := preload("res://scripts/ui/TutorialModal.gd")
 const PhoneManagerScript := preload("res://scripts/phone/PhoneManager.gd")
 const ContactsViewScript := preload("res://scripts/ui/ContactsView.gd")
 const PhoneCallViewScript := preload("res://scripts/ui/PhoneCallView.gd")
+const TextRevealControllerScript := preload("res://scripts/ui/TextRevealController.gd")
+const VoiceBlipPlayerScript := preload("res://scripts/audio/VoiceBlipPlayer.gd")
 const SaveUIScene := preload("res://scenes/ui/SaveUI.tscn")
 const LoadUIScene := preload("res://scenes/ui/LoadUI.tscn")
 
@@ -198,6 +200,11 @@ var node_info_view: Control
 var contacts_view: ContactsView
 var phone_call_view: PhoneCallView
 var _active_right_tab: String = "node_info"
+var text_reveal_controller: TextRevealController
+var voice_blip_player: VoiceBlipPlayer
+var _story_interactions_locked: bool = false
+var _current_reveal_node_data: Dictionary = {}
+var _presentation_paused: bool = false
 
 var case_status_panel: PanelContainer
 var case_status_label: Label
@@ -268,6 +275,7 @@ func _ready() -> void:
 	_build_data_pages()
 	_setup_audio_manager()
 	_setup_tutorial_assets()
+	_setup_text_reveal_system()
 	if not _initialize_case_for_startup():
 		initialization_failed.emit(
 			_initialization_error if _initialization_error != "" else "案件初始化失败"
@@ -284,6 +292,9 @@ func _ready() -> void:
 
 func _exit_tree() -> void:
 	_stop_audio_for_context_change()
+	_stop_node_typing_audio()
+	if ui_sound_manager != null:
+		ui_sound_manager.call("stop_phone_audio")
 
 	if _is_tutorial_case() and cursor_manager != null:
 		cursor_manager.call("deactivate_tutorial")
@@ -296,7 +307,16 @@ func _process(delta: float) -> void:
 		_force_self_to_viewport()
 
 	_refresh_audio_progress_display()
-	if phone_manager != null:
+	var should_pause_presentation := _is_presentation_timing_paused()
+	if should_pause_presentation != _presentation_paused:
+		_presentation_paused = should_pause_presentation
+		if ui_sound_manager != null:
+			ui_sound_manager.call("set_presentation_paused", _presentation_paused)
+		if voice_blip_player != null:
+			voice_blip_player.set_paused(_presentation_paused)
+	if not _presentation_paused and text_reveal_controller != null:
+		text_reveal_controller.update(delta)
+	if not _presentation_paused and phone_manager != null:
 		phone_manager.update(delta)
 
 
@@ -355,6 +375,11 @@ func _input(event: InputEvent) -> void:
 	if _settings_source_context != "" or _data_page_open:
 		return
 
+	if _story_interactions_locked and event.is_action_pressed("ui_confirm"):
+		_skip_current_text_reveal()
+		get_viewport().set_input_as_handled()
+		return
+
 	if event.is_action_pressed("toggle_story_graph"):
 		if _selected_keyword_instance_id != "":
 			_cancel_keyword_connection_selection(true)
@@ -375,6 +400,9 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if event.is_action_pressed("ui_focus_up") or event.is_action_pressed("ui_focus_down"):
+		if _story_interactions_locked:
+			get_viewport().set_input_as_handled()
+			return
 		_focus_story_choice(-1 if event.is_action_pressed("ui_focus_up") else 1)
 		get_viewport().set_input_as_handled()
 		return
@@ -673,6 +701,7 @@ func _build_center_panel() -> Control:
 	story_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	story_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	story_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	story_scroll.gui_input.connect(_on_story_reveal_gui_input)
 	_fill_rect(story_scroll)
 	story_view.add_child(story_scroll)
 
@@ -929,6 +958,39 @@ func _setup_tutorial_assets() -> void:
 		push_warning("MainUI: UISoundManager autoload is unavailable.")
 
 
+func _setup_text_reveal_system() -> void:
+	text_reveal_controller = TextRevealControllerScript.new() as TextRevealController
+	text_reveal_controller.state_changed.connect(_on_text_reveal_state_changed)
+	text_reveal_controller.reveal_completed.connect(_on_text_reveal_completed)
+	text_reveal_controller.post_delay_completed.connect(_on_text_reveal_post_delay_completed)
+	voice_blip_player = VoiceBlipPlayerScript.new() as VoiceBlipPlayer
+	voice_blip_player.name = "VoiceBlipPlayer"
+	add_child(voice_blip_player)
+
+
+func _is_presentation_timing_paused() -> bool:
+	return (
+		_data_page_open
+		or _settings_source_context != ""
+		or (tutorial_modal != null and is_instance_valid(tutorial_modal))
+	)
+
+
+func _start_node_typing_audio() -> void:
+	if ui_sound_manager != null:
+		ui_sound_manager.call("start_node_typing")
+
+
+func _stop_node_typing_audio() -> void:
+	if ui_sound_manager != null:
+		ui_sound_manager.call("stop_node_typing")
+
+
+func _on_phone_transcript_character(profile_id: String, character: String) -> void:
+	if voice_blip_player != null and not _presentation_paused:
+		voice_blip_player.play_character(profile_id, character)
+
+
 func _build_right_panel() -> Control:
 	var panel := PanelContainer.new()
 	panel.name = "RightPanel"
@@ -955,7 +1017,8 @@ func _build_right_panel() -> Control:
 	right_tab_bar.add_child(contacts_tab_button)
 	call_transcript_tab_button = _right_tab_button("通话记录", "call")
 	call_transcript_tab_button.name = "CallTranscriptTabButton"
-	call_transcript_tab_button.visible = false
+	call_transcript_tab_button.disabled = true
+	call_transcript_tab_button.focus_mode = Control.FOCUS_NONE
 	right_tab_bar.add_child(call_transcript_tab_button)
 
 	var content := Control.new()
@@ -1089,7 +1152,7 @@ func _right_tab_button(text: String, tab_id: String) -> Button:
 
 
 func _set_right_tab(tab_id: String) -> void:
-	if tab_id == "call" and (call_transcript_tab_button == null or not call_transcript_tab_button.visible):
+	if tab_id == "call" and (call_transcript_tab_button == null or call_transcript_tab_button.disabled):
 		tab_id = "node_info"
 	_active_right_tab = tab_id
 	if node_info_view != null:
@@ -1119,18 +1182,18 @@ func _set_right_tab(tab_id: String) -> void:
 		button.add_theme_stylebox_override("hover", _style_box(C_BLUE_ACTIVE if active else C_PANEL_SOFT, C_BLUE, 1, 0))
 		button.add_theme_stylebox_override("pressed", _style_box(C_BLUE_DARK, C_BLUE_DARK, 1, 0))
 		button.add_theme_stylebox_override("focus", _style_box(C_BLUE_ACTIVE if active else C_PANEL_SOFT, C_BLUE, 2, 0))
+		button.add_theme_stylebox_override("disabled", _style_box(C_BG, C_DIVIDER, 1, 0))
 
 
 func _setup_phone_system() -> bool:
 	phone_manager = PhoneManagerScript.new() as PhoneManager
 	phone_manager.state_changed.connect(_sync_phone_ui)
 	phone_manager.call_ended.connect(_on_phone_call_ended)
+	phone_manager.transcript_character_revealed.connect(_on_phone_transcript_character)
 	if not phone_manager.configure(loader, runtime_state):
 		return false
 	_sync_phone_ui()
 	if phone_manager.has_visible_call():
-		_set_right_tab("call")
-	elif phone_manager.begin_available_incoming_call():
 		_set_right_tab("call")
 	return true
 
@@ -1141,9 +1204,16 @@ func _sync_phone_ui() -> void:
 	if contacts_view != null:
 		contacts_view.set_contacts(phone_manager.get_discovered_contact_data())
 	var active_call := phone_manager.get_active_call()
+	if ui_sound_manager != null:
+		ui_sound_manager.call("sync_phone_state", active_call)
+	if active_call.is_empty() and voice_blip_player != null:
+		voice_blip_player.stop()
 	var has_call := not active_call.is_empty()
 	if call_transcript_tab_button != null:
-		call_transcript_tab_button.visible = has_call
+		call_transcript_tab_button.visible = true
+		call_transcript_tab_button.disabled = not has_call
+		call_transcript_tab_button.focus_mode = Control.FOCUS_ALL if has_call else Control.FOCUS_NONE
+		call_transcript_tab_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if has_call else Control.CURSOR_ARROW
 	if has_call:
 		phone_call_view.render_call(active_call, phone_manager.get_contact(str(active_call.get("contact_id", ""))))
 	else:
@@ -1230,6 +1300,13 @@ func _record_keyword_from_source(
 					pass
 				"add_contact":
 					contact_added = runtime_state.add_discovered_contact(str(effect.get("contact_id", ""))) or contact_added
+				"set_flag":
+					var flag_id := str(effect.get("flag_id", ""))
+					if bool(effect.get("persistent", false)):
+						runtime_state.set_persistent_flag(flag_id, bool(effect.get("value", true)))
+					elif flag_id != "":
+						runtime_state.flags[flag_id] = bool(effect.get("value", true))
+	runtime_state.capture_history_snapshot()
 	return {
 		"valid": true,
 		"added": bool(add_result.get("added", false)),
@@ -1310,7 +1387,7 @@ func _enter_with_loaded_runtime(runtime_data: Dictionary) -> bool:
 	return true
 
 
-func _show_node(node_id: String) -> void:
+func _show_node(node_id: String, choice_key: String = "") -> void:
 	_hide_keyword_action()
 	_cancel_keyword_connection_selection(false)
 	_graph_feedback_generation += 1
@@ -1325,15 +1402,19 @@ func _show_node(node_id: String) -> void:
 		return
 
 	var source_node_id := runtime_state.current_node_id
+	if source_node_id != "" and source_node_id != node_id:
+		_cancel_text_reveal_for_context_change()
 	if runtime_state.visit_history.is_empty():
 		runtime_state.initialize_visit_history(node_id)
 	elif source_node_id != "" and source_node_id != node_id:
-		runtime_state.commit_transition(source_node_id, node_id)
+		runtime_state.capture_history_snapshot()
+		runtime_state.commit_transition(source_node_id, node_id, choice_key)
 	_stop_audio_for_context_change()
 	_apply_node_flags(node_data)
 	var autosave: bool = bool(node_data.get("autosave", false))
 	runtime_state.set_current_node(node_id, autosave)
-	_render_node(node_data)
+	runtime_state.capture_history_snapshot()
+	_render_node(_resolve_node_state_variant(node_data))
 
 	if (
 		_is_tutorial_case()
@@ -1353,6 +1434,9 @@ func _show_node(node_id: String) -> void:
 
 
 func _render_node(node_data: Dictionary) -> void:
+	node_data = _resolve_node_state_variant(node_data)
+	_current_reveal_node_data = node_data.duplicate(true)
+	_story_interactions_locked = _node_requires_text_reveal_lock(node_data)
 	chapter_small_label.text = str(loader.get_case_metadata().get("code", _format_case_label(loader.get_current_case_id())))
 
 	chapter_dropdown.clear()
@@ -1367,7 +1451,6 @@ func _render_node(node_data: Dictionary) -> void:
 	_set_framed_label_text(node_type_label, str(node_data.get("node_type", "事件节点")))
 	story_title_label.text = str(node_data.get("title", ""))
 
-	_render_tutorial_hints(node_data)
 	_render_audio_cards(node_data)
 	_render_image_cards(node_data)
 	_render_story_body(node_data)
@@ -1375,8 +1458,184 @@ func _render_node(node_data: Dictionary) -> void:
 	_render_graph_view()
 	_render_right_panel(node_data)
 	_update_backtrack_button_state()
+	_start_node_text_reveal(node_data)
 
 	call_deferred("_apply_scrollbar_styles")
+
+
+func _node_requires_text_reveal_lock(node_data: Dictionary) -> bool:
+	if runtime_state == null or runtime_state.is_reviewing_history():
+		return false
+	var node_id := str(node_data.get("node_id", runtime_state.current_node_id))
+	var restored := runtime_state.active_text_reveal
+	if str(restored.get("node_id", "")) == node_id and not bool(restored.get("completed", false)):
+		return true
+	var config_value: Variant = node_data.get("text_reveal", {})
+	var config: Dictionary = config_value if config_value is Dictionary else {}
+	return str(config.get("mode", "first_visit")) != "instant" and not runtime_state.is_node_revealed(node_id)
+
+
+func _start_node_text_reveal(node_data: Dictionary) -> void:
+	if text_reveal_controller == null:
+		return
+	var node_id := str(node_data.get("node_id", runtime_state.current_node_id))
+	var config_value: Variant = node_data.get("text_reveal", {})
+	var config: Dictionary = (config_value as Dictionary).duplicate(true) if config_value is Dictionary else {}
+	var title_cps := maxf(1.0, float(config.get("title_cps", TextRevealController.DEFAULT_TITLE_CPS)))
+	var body_cps := maxf(1.0, float(config.get("body_cps", TextRevealController.DEFAULT_BODY_CPS)))
+	var sections: Array[Dictionary] = []
+	var title_text := str(node_data.get("title", ""))
+	if title_text != "":
+		sections.append({"control": story_title_label, "text": title_text, "cps": title_cps})
+	var body_text := _get_story_body_text(node_data.get("body", []))
+	if body_text != "":
+		sections.append({"control": story_body_label, "text": body_text, "cps": body_cps})
+	var quote_text := str(node_data.get("quote", ""))
+	if quote_text != "":
+		sections.append({"control": quote_label, "text": quote_text, "cps": body_cps})
+	var pending_events := _pending_after_reveal_events(node_data)
+	if not pending_events.is_empty():
+		config["post_delay"] = maxf(0.0, float(pending_events[0].get("delay", config.get("post_delay", 0.8))))
+	var restored := runtime_state.active_text_reveal
+	var restoring_current := str(restored.get("node_id", "")) == node_id and not bool(restored.get("events_completed", false))
+	var mode := str(config.get("mode", "first_visit"))
+	var animate_text := (
+		not runtime_state.is_reviewing_history()
+		and mode != "instant"
+		and not runtime_state.is_node_revealed(node_id)
+	)
+	if restoring_current and not bool(restored.get("completed", false)):
+		animate_text = true
+	text_reveal_controller.start(
+		node_id,
+		sections,
+		config,
+		restored if restoring_current else {},
+		animate_text,
+		not pending_events.is_empty()
+	)
+	if text_reveal_controller.is_revealing():
+		_story_interactions_locked = true
+		target_text_label.text = "阅读当前记录。"
+		_render_choices(node_data)
+		_start_node_typing_audio()
+	else:
+		_story_interactions_locked = false
+		runtime_state.mark_node_revealed(node_id)
+		_render_choices(node_data)
+		_render_right_panel(node_data)
+		_render_tutorial_hints(node_data)
+		if text_reveal_controller.events_completed():
+			runtime_state.active_text_reveal.clear()
+
+
+func _pending_after_reveal_events(node_data: Dictionary) -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	var events_value: Variant = node_data.get("after_reveal_events", [])
+	if not (events_value is Array):
+		return result
+	var node_id := str(node_data.get("node_id", runtime_state.current_node_id))
+	for index in range((events_value as Array).size()):
+		var event_value: Variant = (events_value as Array)[index]
+		if not (event_value is Dictionary):
+			continue
+		var event_id := "%s:%d" % [node_id, index]
+		if runtime_state.is_after_reveal_event_completed(event_id):
+			continue
+		var event := (event_value as Dictionary).duplicate(true)
+		event["_event_id"] = event_id
+		result.append(event)
+	return result
+
+
+func _on_text_reveal_state_changed(state: Dictionary) -> void:
+	if runtime_state == null:
+		return
+	if str(state.get("node_id", "")) == runtime_state.current_node_id:
+		runtime_state.active_text_reveal = state.duplicate(true)
+
+
+func _on_text_reveal_completed(_skipped: bool) -> void:
+	if runtime_state == null or text_reveal_controller == null:
+		return
+	var state := text_reveal_controller.get_state()
+	if str(state.get("node_id", "")) != runtime_state.current_node_id:
+		return
+	_stop_node_typing_audio()
+	runtime_state.mark_node_revealed(runtime_state.current_node_id)
+	_story_interactions_locked = false
+	var node_data := loader.get_node(runtime_state.current_node_id)
+	if not node_data.is_empty():
+		_render_choices(node_data)
+		_render_right_panel(node_data)
+		_refresh_current_goal()
+	if text_reveal_controller.events_completed():
+		runtime_state.active_text_reveal.clear()
+
+
+func _on_text_reveal_post_delay_completed() -> void:
+	if runtime_state == null:
+		return
+	var node_data := loader.get_node(runtime_state.current_node_id)
+	if node_data.is_empty():
+		return
+	_execute_after_reveal_events(node_data)
+	runtime_state.active_text_reveal.clear()
+
+
+func _execute_after_reveal_events(node_data: Dictionary) -> void:
+	for event in _pending_after_reveal_events(node_data):
+		var event_id := str(event.get("_event_id", ""))
+		match str(event.get("type", "")):
+			"incoming_call":
+				var call_id := str(event.get("call_id", ""))
+				var started := false
+				if phone_manager != null:
+					var active := phone_manager.get_active_call()
+					started = str(active.get("call_id", "")) == call_id or phone_manager.begin_incoming_call(call_id)
+				if started:
+					_set_right_tab("call")
+				else:
+					push_warning("MainUI: after-reveal incoming call could not start: " + call_id)
+			"tutorial_backtrack_prompt":
+				runtime_state.set_persistent_flag("tutorial_backtrack_learned", true)
+				runtime_state.set_persistent_flag("inspect_bag_option_unlocked", true)
+				runtime_state.set_persistent_flag("tutorial_backtrack_hint_shown", true)
+				_set_backtrack_tutorial_highlight(true)
+				_show_case_status("调查行为改变了原始状态。请使用顶部“回溯”返回选择前。")
+			"keyword_tutorial":
+				runtime_state.set_persistent_flag("tutorial_keyword_popup_shown", true)
+				runtime_state.set_persistent_flag("tutorial_keyword_popup_open", true)
+				_render_story_body(_resolve_node_state_variant(node_data))
+				_show_keyword_training_modal(event)
+			_:
+				push_warning("MainUI: unsupported after-reveal event type: " + str(event.get("type", "")))
+		runtime_state.mark_after_reveal_event_completed(event_id)
+	_refresh_current_goal()
+
+
+func _skip_current_text_reveal() -> void:
+	if text_reveal_controller != null:
+		text_reveal_controller.skip()
+
+
+func _on_story_reveal_gui_input(event: InputEvent) -> void:
+	if not _story_interactions_locked or not story_view.visible:
+		return
+	if event is InputEventMouseButton:
+		var mouse_event := event as InputEventMouseButton
+		if mouse_event.pressed and mouse_event.button_index == MOUSE_BUTTON_LEFT:
+			_skip_current_text_reveal()
+			story_scroll.accept_event()
+
+
+func _cancel_text_reveal_for_context_change() -> void:
+	_stop_node_typing_audio()
+	if text_reveal_controller != null:
+		text_reveal_controller.clear()
+	if runtime_state != null:
+		runtime_state.active_text_reveal.clear()
+	_story_interactions_locked = false
 
 
 func _refresh_current_goal() -> void:
@@ -1387,7 +1646,8 @@ func _refresh_current_goal() -> void:
 
 	if not current_data.is_empty():
 		target_text_label.text = _current_goal_for_node(current_data)
-		_render_tutorial_hints(current_data)
+		if not _story_interactions_locked:
+			_render_tutorial_hints(current_data)
 
 
 func _render_tutorial_hints(node_data: Dictionary) -> void:
@@ -1403,10 +1663,12 @@ func _render_tutorial_hints(node_data: Dictionary) -> void:
 					{"prompt": "mouse_left", "text": "鼠标左键：播放这段音频"},
 					{"prompt": "mouse_drag", "text": "按住鼠标左键：拖动播放线调整位置"}
 				])
-		"tutorial_0003":
-			_queue_tutorial_modal_once("backtrack", [
-				{"prompt": "mouse_left", "text": "鼠标左键：点击顶部“回溯”返回上一条记录"}
-			])
+		"tutorial_0012_a":
+			if bool(runtime_state.flags.get("tutorial_backtrack_hint_shown", false)):
+				_set_backtrack_tutorial_highlight(true)
+		"tutorial_0013":
+			if bool(runtime_state.flags.get("tutorial_keyword_popup_open", false)):
+				_show_keyword_training_modal({})
 		"tutorial_0006":
 			if not bool(runtime_state.flags.get("tutorial_first_keyword_clicked", false)):
 				_queue_tutorial_modal_once("keyword_extract", [
@@ -1447,6 +1709,20 @@ func _queue_tutorial_modal_once(hint_key: String, prompts: Array[Dictionary]) ->
 		call_deferred("_show_next_tutorial_modal")
 
 
+func _show_keyword_training_modal(event: Dictionary) -> void:
+	if tutorial_modal != null and is_instance_valid(tutorial_modal):
+		return
+	var title := str(event.get("title", "记录关键词"))
+	var body := str(event.get(
+		"body",
+		"调查材料中可能隐藏着能够继续推理的信息。点击正文中带下划线的文字，将“胶痕”记录为关键词。\n\n后续调查中的关键词不会始终被标记出来，需要你根据材料内容自行判断。"
+	))
+	tutorial_modal = TutorialModalScript.new() as Control
+	tutorial_modal.call("configure_message", title, body, "继续")
+	tutorial_modal.connect("dismissed", _on_tutorial_modal_dismissed)
+	add_child(tutorial_modal)
+
+
 func _show_next_tutorial_modal() -> void:
 	_tutorial_modal_show_scheduled = false
 
@@ -1465,6 +1741,8 @@ func _show_next_tutorial_modal() -> void:
 
 func _on_tutorial_modal_dismissed() -> void:
 	tutorial_modal = null
+	if runtime_state != null and bool(runtime_state.flags.get("tutorial_keyword_popup_open", false)):
+		runtime_state.set_persistent_flag("tutorial_keyword_popup_open", false)
 	if _save_error_modal_active:
 		_save_error_modal_active = false
 		return
@@ -1508,6 +1786,8 @@ func _show_save_error_modal() -> void:
 
 func _current_goal_for_node(node_data: Dictionary) -> String:
 	var configured_goal: String = str(node_data.get("current_goal", loader.get_current_goal()))
+	if _story_interactions_locked:
+		return "阅读当前记录。"
 	if (
 		runtime_state != null
 		and str(runtime_state.active_call.get("waiting_for_keyword", "")) != ""
@@ -1528,12 +1808,12 @@ func _current_goal_for_node(node_data: Dictionary) -> String:
 				if bool(runtime_state.flags.get("tutorial_audio_started", false))
 				else configured_goal
 			)
-		"tutorial_0003":
-			return (
-				"检查档案当前的状态。"
-				if bool(runtime_state.flags.get("backtrack_tutorial_completed", false))
-				else configured_goal
-			)
+		"tutorial_0001":
+			return "重新调查档案袋。" if bool(runtime_state.flags.get("inspect_bag_option_unlocked", false)) else configured_goal
+		"tutorial_0012_a":
+			return "使用“回溯”，返回拆开档案袋之前。"
+		"tutorial_0013":
+			return "点击正文中的“胶痕”，将它记录为关键词。" if not bool(runtime_state.flags.get("tutorial_glue_mark_recorded", false)) else "已记录关键线索“胶痕”。"
 		"tutorial_0006":
 			if not runtime_state.has_keyword("页码缺口", "tutorial_0006"):
 				return configured_goal
@@ -1583,17 +1863,41 @@ func _current_goal_for_node(node_data: Dictionary) -> String:
 func _choice_is_available(choice: Dictionary) -> bool:
 	var requirements: Variant = choice.get("requires_flags", {})
 
-	if not (requirements is Dictionary):
-		return true
+	if requirements is Dictionary:
+		for flag_value in (requirements as Dictionary).keys():
+			var flag_name: String = str(flag_value)
+			var expected: bool = bool((requirements as Dictionary).get(flag_value, false))
 
-	for flag_value in (requirements as Dictionary).keys():
-		var flag_name: String = str(flag_value)
-		var expected: bool = bool((requirements as Dictionary).get(flag_value, false))
+			if bool(runtime_state.flags.get(flag_name, false)) != expected:
+				return false
 
-		if bool(runtime_state.flags.get(flag_name, false)) != expected:
-			return false
+	var case_requirements: Variant = choice.get("requires_case_state", {})
+	if case_requirements is Dictionary:
+		for state_key_value in (case_requirements as Dictionary).keys():
+			var state_key := str(state_key_value)
+			if runtime_state.case_state.get(state_key) != (case_requirements as Dictionary)[state_key_value]:
+				return false
 
 	return true
+
+
+func _resolve_node_state_variant(node_data: Dictionary) -> Dictionary:
+	var resolved := node_data.duplicate(true)
+	var variants_value: Variant = node_data.get("state_variants", [])
+	if not (variants_value is Array):
+		return resolved
+	for variant_value in (variants_value as Array):
+		if not (variant_value is Dictionary):
+			continue
+		var variant: Dictionary = variant_value
+		if not _choice_is_available(variant):
+			continue
+		for key_value in variant.keys():
+			var key := str(key_value)
+			if key not in ["requires_flags", "requires_case_state"]:
+				resolved[key] = variant[key_value]
+		break
+	return resolved
 
 
 func _render_story_body(node_data: Dictionary) -> void:
@@ -1648,6 +1952,8 @@ func _build_story_keyword_ranges(source_node_id: String, body_text: String) -> A
 
 	for preset_index in range(presets.size()):
 		var preset: Dictionary = presets[preset_index]
+		if not _choice_is_available(preset):
+			continue
 		var anchor_text: String = str(preset.get("anchor_text", ""))
 		var occurrence_index: int = int(preset.get("occurrence_index", 0))
 		var range_start: int = _find_text_occurrence(body_text, anchor_text, occurrence_index)
@@ -1738,6 +2044,8 @@ func _append_story_keyword_segment(
 
 
 func _on_story_keyword_meta_clicked(meta_value: Variant) -> void:
+	if _story_interactions_locked:
+		return
 	var preset: Dictionary = _resolve_story_keyword_meta(meta_value)
 
 	if preset.is_empty():
@@ -1764,7 +2072,8 @@ func _on_story_keyword_meta_clicked(meta_value: Variant) -> void:
 	var result: Dictionary = _record_keyword_from_source(
 		keyword,
 		source_node_id,
-		"story_body"
+		"story_body",
+		str(preset.get("keyword_id", ""))
 	)
 
 	if not bool(result.get("valid", false)) or not bool(result.get("added", false)):
@@ -1787,6 +2096,12 @@ func _on_story_keyword_meta_clicked(meta_value: Variant) -> void:
 
 	_show_keyword_popup(keyword, false, popup_position)
 	_play_tutorial_ui_sound("ui_keyword_extract")
+
+	if source_node_id == "tutorial_0013" and keyword == "胶痕":
+		runtime_state.set_persistent_flag("tutorial_keyword_recording_learned", true)
+		runtime_state.set_persistent_flag("tutorial_glue_mark_recorded", true)
+		_render_story_body(_resolve_node_state_variant(current_node_data))
+		_show_case_status("已记录关键词：胶痕")
 
 	if (
 		_is_tutorial_case()
@@ -1838,6 +2153,10 @@ func _resolve_story_keyword_meta(meta_value: Variant) -> Dictionary:
 
 
 func _on_story_keyword_meta_hover_started(meta_value: Variant) -> void:
+	if _story_interactions_locked:
+		story_body_label.tooltip_text = ""
+		story_body_label.mouse_default_cursor_shape = Control.CURSOR_ARROW
+		return
 	var preset: Dictionary = _resolve_story_keyword_meta(meta_value)
 
 	if preset.is_empty():
@@ -2014,34 +2333,12 @@ func _refresh_keyword_grid() -> void:
 
 func _render_choices(node_data: Dictionary) -> void:
 	_clear_children(choice_list)
+	if _story_interactions_locked:
+		choice_title_label.visible = false
+		return
 
 	var choices: Variant = node_data.get("choices", [])
 	choice_title_label.visible = false
-	if runtime_state.is_reviewing_history():
-		var transition := runtime_state.get_committed_transition_at(runtime_state.history_cursor)
-		if not transition.is_empty():
-			var committed_choice: Dictionary = {}
-			if choices is Array:
-				for choice_value in choices:
-					if choice_value is Dictionary and _get_choice_target_node_id(choice_value) == str(transition.get("target_node_id", "")):
-						committed_choice = (choice_value as Dictionary).duplicate(true)
-						break
-			if committed_choice.is_empty():
-				var target_data := loader.get_node(str(transition.get("target_node_id", "")))
-				committed_choice = {
-					"title": "继续查看已选择路径",
-					"description": str(target_data.get("title", "下一条记录")),
-					"to": str(transition.get("target_node_id", ""))
-				}
-			committed_choice["_history_review"] = true
-			choice_title_label.visible = true
-			choice_list.add_child(_choice_button(
-				_icon_by_name(_choice_icon_name(committed_choice)),
-				str(committed_choice.get("title", "已选择")),
-				_choice_description(committed_choice),
-				committed_choice
-			))
-		return
 
 	if not (choices is Array):
 		choices = []
@@ -2078,6 +2375,7 @@ func _render_choices(node_data: Dictionary) -> void:
 
 
 func _render_right_panel(node_data: Dictionary) -> void:
+	node_data = _resolve_node_state_variant(node_data)
 	current_node_title.text = str(node_data.get("title", ""))
 	current_node_body.text = _node_summary(node_data)
 
@@ -2092,6 +2390,8 @@ func _render_right_panel(node_data: Dictionary) -> void:
 	else:
 		_add_operation_help("Tab", "切换到图谱")
 		_add_operation_help("Esc", "返回或关闭上层页面")
+		if runtime_state.current_node_id == "tutorial_0012_a":
+			_add_operation_help("回溯", "返回拆开档案袋之前")
 		if _first_array_value(node_data.get("audio_clues", []), "") != "":
 			_add_operation_help("Space", "播放 / 暂停音频")
 		if _has_story_choice_controls():
@@ -2142,6 +2442,14 @@ func _render_graph_view() -> void:
 	_graph_node_positions = (graph_layout_result.get("positions", {}) as Dictionary).duplicate(true)
 	_graph_node_sizes = (graph_layout_result.get("sizes", {}) as Dictionary).duplicate(true)
 	_graph_node_depths = (graph_layout_result.get("depths", {}) as Dictionary).duplicate(true)
+	var node_to_slot: Dictionary = graph_layout_result.get("node_to_slot", {})
+	for actual_id_value in visible_nodes.keys():
+		var actual_id := str(actual_id_value)
+		var slot_id := str(node_to_slot.get(actual_id, actual_id))
+		if _graph_node_positions.has(slot_id):
+			_graph_node_positions[actual_id] = _graph_node_positions[slot_id]
+			_graph_node_sizes[actual_id] = _graph_node_sizes.get(slot_id, GRAPH_NODE_SIZE)
+			_graph_node_depths[actual_id] = _graph_node_depths.get(slot_id, 0)
 	var canvas_size: Vector2 = graph_layout_result.get("canvas_size", Vector2(1080.0, 720.0))
 	var minimum_anchor_canvas := graph_scroll.size / 0.6 + Vector2(240.0, 240.0)
 	var expanded_canvas := Vector2(
@@ -2156,7 +2464,9 @@ func _render_graph_view() -> void:
 	canvas_size = expanded_canvas
 	_graph_canvas_size = canvas_size
 	_keyword_graph_layout = _calculate_keyword_graph_layout(visible_nodes, canvas_size)
-	_active_path_transition_indices = _calculate_active_path_transition_indices(runtime_state.history_cursor)
+	_active_path_transition_indices.clear()
+	for transition_index in runtime_state.get_active_transition_indices():
+		_active_path_transition_indices[transition_index] = true
 	var edges: Array[Dictionary] = _build_narrative_graph_edges(visible_nodes)
 	edges.append_array(_build_keyword_origin_edges())
 	edges.append_array(_build_keyword_connection_edges(visible_nodes))
@@ -2167,7 +2477,8 @@ func _render_graph_view() -> void:
 	graph_zoom_container.size = screen_canvas_size
 	graph_canvas.scale = Vector2.ONE
 
-	for node_value in visible_nodes.keys():
+	var display_nodes := _get_graph_display_nodes(visible_nodes)
+	for node_value in display_nodes.values():
 		var node_id: String = str(node_value)
 		var node_data: Dictionary = loader.get_node(node_id)
 
@@ -2179,7 +2490,7 @@ func _render_graph_view() -> void:
 			push_warning("MainUI: graph hierarchy omitted visible node: " + node_id)
 			continue
 
-		var visited: bool = runtime_state.unlocked_nodes.has(node_id)
+		var visited: bool = runtime_state.unlocked_nodes.has(node_id) or runtime_state.visit_history.has(node_id)
 		var current: bool = node_id == runtime_state.current_node_id
 		var keyword_unlocked: bool = runtime_state.is_keyword_unlocked(node_id)
 		graph_canvas.add_child(_graph_node_card(
@@ -2212,6 +2523,10 @@ func _get_visible_graph_nodes() -> Dictionary:
 	for node_id in runtime_state.unlocked_nodes.keys():
 		visible_nodes[str(node_id)] = true
 
+	for historical_node_id in runtime_state.visit_history:
+		if not loader.get_node(historical_node_id).is_empty():
+			visible_nodes[historical_node_id] = true
+
 	for node_id in runtime_state.get_keyword_unlocked_node_ids():
 		if not loader.get_node(node_id).is_empty():
 			visible_nodes[node_id] = true
@@ -2235,6 +2550,33 @@ func _get_visible_graph_nodes() -> Dictionary:
 					visible_nodes[target_id] = true
 
 	return visible_nodes
+
+
+func _get_graph_display_nodes(visible_nodes: Dictionary) -> Dictionary:
+	var display_by_slot: Dictionary = {}
+	for node_id_value in visible_nodes.keys():
+		var node_id := str(node_id_value)
+		var node_data := loader.get_node(node_id)
+		if node_data.is_empty():
+			continue
+		var slot_id := str(node_data.get("graph_slot_id", node_id))
+		if not display_by_slot.has(slot_id):
+			display_by_slot[slot_id] = node_id
+	# The current variant owns the shared card. Otherwise the most recently
+	# visited variant is shown; an unvisited sibling is never selected.
+	for history_index in range(runtime_state.visit_history.size() - 1, -1, -1):
+		var visited_id := runtime_state.visit_history[history_index]
+		if not visible_nodes.has(visited_id):
+			continue
+		var visited_data := loader.get_node(visited_id)
+		var visited_slot := str(visited_data.get("graph_slot_id", visited_id))
+		if display_by_slot.has(visited_slot):
+			display_by_slot[visited_slot] = visited_id
+	var current_data := loader.get_node(runtime_state.current_node_id)
+	if not current_data.is_empty():
+		var current_slot := str(current_data.get("graph_slot_id", runtime_state.current_node_id))
+		display_by_slot[current_slot] = runtime_state.current_node_id
+	return display_by_slot
 
 
 func _calculate_keyword_graph_layout(
@@ -2954,6 +3296,7 @@ func _complete_keyword_connection(target_node_id: String) -> void:
 				)
 
 		_apply_rule_flags(rule)
+		runtime_state.capture_history_snapshot()
 
 		if bool(rule.get("autosave_on_success", false)) and not _suppress_disk_autosave:
 			var current_node_data: Dictionary = loader.get_node(runtime_state.current_node_id)
@@ -4400,6 +4743,7 @@ func _on_load_requested(slot_type: String, slot_index: int) -> void:
 		return
 
 	_stop_audio_for_context_change()
+	_cancel_text_reveal_for_context_change()
 	_hide_keyword_action()
 	_cancel_keyword_connection_selection(false)
 	_graph_feedback_generation += 1
@@ -4429,8 +4773,6 @@ func _on_load_requested(slot_type: String, slot_index: int) -> void:
 	if phone_manager != null:
 		_sync_phone_ui()
 		if phone_manager.has_visible_call():
-			_set_right_tab("call")
-		elif phone_manager.begin_available_incoming_call():
 			_set_right_tab("call")
 	_show_case_status("存档读取成功")
 
@@ -4506,6 +4848,30 @@ func _update_backtrack_button_state() -> void:
 	_get_nav_hit_button(backtrack_nav_button).disabled = not _has_backtrack_target()
 
 
+func _set_backtrack_tutorial_highlight(enabled: bool) -> void:
+	if backtrack_nav_button == null:
+		return
+	backtrack_nav_button.set_meta("tutorial_highlight", enabled)
+	if not enabled:
+		_set_nav_button_active(backtrack_nav_button, false)
+		var reset_style: StyleBoxFlat = backtrack_nav_button.get_meta("nav_style") as StyleBoxFlat
+		if reset_style != null:
+			reset_style.set_border_width_all(1)
+		backtrack_nav_button.tooltip_text = ""
+		return
+	var panel: PanelContainer = backtrack_nav_button.get_node("Panel") as PanelContainer
+	var style: StyleBoxFlat = backtrack_nav_button.get_meta("nav_style") as StyleBoxFlat
+	if style == null:
+		style = _style_box(C_PANEL_SOFT, C_BLUE, 2, 4)
+		panel.add_theme_stylebox_override("panel", style)
+		backtrack_nav_button.set_meta("nav_style", style)
+	else:
+		style.bg_color = C_PANEL_SOFT
+		style.border_color = C_BLUE
+		style.set_border_width_all(2)
+	backtrack_nav_button.tooltip_text = "使用回溯返回拆开档案袋之前"
+
+
 func _on_backtrack_pressed() -> void:
 	var previous_index := _previous_history_index()
 	if previous_index < 0:
@@ -4515,12 +4881,9 @@ func _on_backtrack_pressed() -> void:
 	var node_before_backtrack: String = runtime_state.current_node_id
 	var previous_node_id := runtime_state.visit_history[previous_index]
 	_play_tutorial_ui_sound("ui_backtrack")
-	if (
-		_is_tutorial_case()
-		and node_before_backtrack == "tutorial_0003"
-		and previous_node_id in ["tutorial_0002a", "tutorial_0002b", "tutorial_0002c", "tutorial_0002d"]
-	):
-		runtime_state.flags["backtrack_tutorial_completed"] = true
+	if _is_tutorial_case() and node_before_backtrack == "tutorial_0012_a" and previous_node_id == "tutorial_0001":
+		runtime_state.set_persistent_flag("tutorial_backtrack_learned", true)
+		runtime_state.set_persistent_flag("inspect_bag_option_unlocked", true)
 	_show_history_cursor(previous_index)
 
 
@@ -4528,8 +4891,8 @@ func _show_history_cursor(index: int) -> void:
 	if runtime_state.visit_history.is_empty():
 		return
 	var safe_index := clampi(index, 0, runtime_state.visit_history.size() - 1)
-	runtime_state.history_cursor = safe_index
-	runtime_state.current_node_id = runtime_state.visit_history[safe_index]
+	if not runtime_state.restore_history_snapshot(safe_index):
+		return
 	var node_data := loader.get_node(runtime_state.current_node_id)
 	if node_data.is_empty():
 		return
@@ -4537,7 +4900,7 @@ func _show_history_cursor(index: int) -> void:
 	_hide_keyword_action()
 	_cancel_keyword_connection_selection(false)
 	_hide_data_pages()
-	_render_node(node_data)
+	_render_node(_resolve_node_state_variant(node_data))
 	story_scroll.scroll_vertical = 0
 	story_view.visible = true
 	graph_view.visible = false
@@ -4547,7 +4910,8 @@ func _show_history_cursor(index: int) -> void:
 	_set_nav_button_active(save_nav_button, false)
 	_set_nav_button_active(load_nav_button, false)
 	_set_nav_button_active(settings_nav_button, false)
-	_render_right_panel(node_data)
+	_render_right_panel(_resolve_node_state_variant(node_data))
+	_set_backtrack_tutorial_highlight(false)
 
 
 func _show_story_view() -> void:
@@ -4783,9 +5147,8 @@ func _find_graph_node_control(node_id: String) -> Control:
 
 
 func _choice_button(texture: Texture2D, title: String, desc: String, choice: Dictionary) -> Control:
-	var history_review := bool(choice.get("_history_review", false))
-	var choice_color := C_MUTED if history_review else C_BLUE
-	var choice_border := C_DIVIDER if history_review else C_BLUE
+	var choice_color := C_BLUE
+	var choice_border := C_BLUE
 	var root_control := Control.new()
 	root_control.custom_minimum_size = Vector2(STORY_CONTENT_WIDTH, 62)
 
@@ -4829,17 +5192,12 @@ func _choice_button(texture: Texture2D, title: String, desc: String, choice: Dic
 	desc_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	text_box.add_child(desc_label)
 
-	if history_review:
-		var selected_badge := _small_framed_label("已选择", Vector2(62, 25), 13, C_MUTED, Color.TRANSPARENT, C_MUTED, 1, 2, FONT_SERIF_REGULAR)
-		selected_badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		row.add_child(selected_badge)
-	else:
-		var arrow := _label("›", 28, choice_color, FONT_MONO_MEDIUM)
-		arrow.custom_minimum_size.x = 24
-		arrow.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		arrow.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		arrow.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		row.add_child(arrow)
+	var arrow := _label("›", 28, choice_color, FONT_MONO_MEDIUM)
+	arrow.custom_minimum_size.x = 24
+	arrow.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	arrow.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	arrow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(arrow)
 
 	var hit_button := _transparent_hit_button()
 	hit_button.focus_mode = Control.FOCUS_ALL
@@ -5352,9 +5710,6 @@ func _apply_scrollbar_style(bar: ScrollBar, vertical: bool) -> void:
 
 func _on_choice_pressed(choice: Dictionary) -> void:
 	_play_tutorial_ui_sound("ui_click")
-	if bool(choice.get("_history_review", false)):
-		_show_history_cursor(runtime_state.history_cursor + 1)
-		return
 	if bool(choice.get("_failure_hint", false)):
 		_show_failure_hint(str(choice.get("_failure_hint_text", "")))
 		return
@@ -5406,7 +5761,7 @@ func _on_choice_pressed(choice: Dictionary) -> void:
 			"你作出的选择会改变当前看到的调查记录。"
 		)
 
-	_show_node(target_node_id)
+	_show_node(target_node_id, str(choice.get("id", choice.get("title", ""))))
 
 
 func _apply_node_flags(node_data: Dictionary) -> void:
@@ -5420,12 +5775,25 @@ func _apply_node_flags(node_data: Dictionary) -> void:
 			if flag_name != "" and enabled_value is bool:
 				runtime_state.flags[flag_name] = bool(enabled_value)
 
+	var case_state_value: Variant = node_data.get("set_case_state", {})
+	if case_state_value is Dictionary:
+		runtime_state.set_case_state_values(case_state_value)
+
 	_normalize_tutorial_investigation_flags()
 
 
 func _normalize_tutorial_investigation_flags() -> void:
 	if not _is_tutorial_case() or runtime_state == null:
 		return
+	var default_case_state := {
+		"bag_opened": false,
+		"seal_state_preserved": true,
+		"seal_evidence_available": false,
+		"current_bag_route": ""
+	}
+	for state_key in default_case_state.keys():
+		if not runtime_state.case_state.has(state_key):
+			runtime_state.case_state[state_key] = default_case_state[state_key]
 
 	var evidence_found := bool(runtime_state.flags.get("tutorial_seal_evidence_found", false))
 	var evidence_lost := bool(runtime_state.flags.get("tutorial_seal_evidence_lost", false))

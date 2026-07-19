@@ -275,6 +275,21 @@ func get_node(node_id: String) -> Dictionary:
 	return {}
 
 
+func get_logical_node_id(node_id: String) -> String:
+	var node := get_node(node_id)
+	return str(node.get("logical_node_id", node_id)) if not node.is_empty() else node_id
+
+
+func get_graph_slot_id(node_id: String) -> String:
+	var node := get_node(node_id)
+	return str(node.get("graph_slot_id", node_id)) if not node.is_empty() else node_id
+
+
+func get_variant_id(node_id: String) -> String:
+	var node := get_node(node_id)
+	return str(node.get("variant_id", "default")) if not node.is_empty() else "default"
+
+
 func get_initial_node_id() -> String:
 	return str(case_metadata.get("start_node_id", data.get("initial_node_id", "")))
 

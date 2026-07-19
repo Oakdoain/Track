@@ -10,53 +10,140 @@
 			"node_id": "tutorial_0000",
 			"title": "开始之前",
 			"icon_key": "archive",
-			"node_type": "音频教学节点",
+			"node_type": "剧情节点",
 			"location": "档案库 / 调阅终端",
 			"time_label": "T-00",
 			"characters": ["你"],
-			"current_goal": "接听助手来电。",
+			"current_goal": "阅读当前记录。",
 			"body": [
-				"电话铃声从手臂下面传来。",
-				"你睁开眼时，窗外的光已经从桌角挪到了文件架上。昨晚没有整理完的卷宗压在手肘下面，最上方那一页留下了一道浅淡的折痕。",
-				"电话还在响。",
-				"屏幕上没有姓名，只有一行内部线路编号。"
+				"午后的光越过百叶窗，在桌面上切出几道倾斜的亮痕。",
+				"你伏在尚未整理完的文件旁睡着了。手臂压着一只牛皮纸档案袋，纸角在袖口留下了一道浅痕。",
+				"电话铃声响起时，你花了几秒钟，才重新辨认出自己所在的地方。"
 			],
 			"audio_clues": ["audio_tutorial"],
 			"text_clues": [],
 			"room_refs": [],
-			"choices": [
+			"choices": [],
+			"text_reveal": {
+				"mode": "first_visit",
+				"post_delay": 0.8
+			},
+			"after_reveal_events": [
 				{
-					"title": "开始调阅",
-					"desc": "打开编号为 T-00 的调查流程训练档案。",
-					"to": "tutorial_0001",
-					"requires_flags": {"tutorial_audio_started": true}
+					"type": "incoming_call",
+					"call_id": "tutorial_assistant_opening",
+					"delay": 0.8
 				}
 			],
 			"autosave": true
 		},
 		{
 			"node_id": "tutorial_0001",
-			"title": "此处开始",
-			"icon_key": "start",
-			"node_type": "教学节点",
+			"title": "档案袋调查",
+			"icon_key": "investigation",
+			"node_type": "调查节点",
 			"location": "档案库 / 训练档案",
 			"time_label": "T-00",
 			"characters": ["你"],
-			"current_goal": "开始检查训练档案。",
+			"current_goal": "拆开档案袋。",
+			"set_case_state": {
+				"bag_opened": false,
+				"seal_state_preserved": true,
+				"seal_evidence_available": false,
+				"current_bag_route": ""
+			},
 			"body": [
-				"你正在查看一份编号为T-00的训练档案。",
-				"在本游戏中，你作为一名侦探，将阅读案件记录、做出调查选择、从正文中发现关键词，并利用图谱判断不同信息之间的关系。",
-				"你的选择会改变调查过程，也可能改变最终能够确认的结论。",
-				"面前的档案袋尚未拆封。检查顺序不会阻止你完成训练，但有些原始状态一旦改变就无法恢复。"
+				"桌上的档案袋没有明显破损。封条仍压在袋口，标签上写着编号 T-00。",
+				"刚从午睡中醒来，思路还没有完全恢复。你下意识地把注意力放在了袋内材料上。"
+			],
+			"state_variants": [
+				{
+					"requires_flags": {"inspect_bag_option_unlocked": true},
+					"current_goal": "重新调查档案袋。",
+					"body": [
+						"你重新看向桌上的档案袋。",
+						"封条仍压在袋口，档案袋还保持着尚未被你打开的状态。",
+						"你所作出的选择都会影响之后的调查流程。但这并不意味着你必须害怕尝试。发现问题、回到关键节点，再验证另一种可能，本身也是调查的一部分。"
+					]
+				}
 			],
 			"audio_clues": [],
 			"text_clues": [],
 			"room_refs": [],
 			"choices": [
 				{
-					"title": "开始调查",
-					"desc": "进入调查枢纽，自行决定检查顺序。",
-					"to": "tutorial_0003"
+					"id": "inspect_bag_before_opening",
+					"title": "检查档案袋",
+					"desc": "在打开之前观察档案袋的外部状态。",
+					"to": "tutorial_0013",
+					"requires_flags": {"inspect_bag_option_unlocked": true}
+				},
+				{
+					"id": "open_bag_directly",
+					"title": "拆开档案袋",
+					"desc": "查看里面保存的材料。",
+					"to": "tutorial_0012_a"
+				}
+			],
+			"autosave": true
+		},
+		{
+			"node_id": "tutorial_0012_a",
+			"logical_node_id": "tutorial_0012",
+			"graph_slot_id": "tutorial_0012",
+			"variant_id": "opened_directly",
+			"title": "直接拆开档案袋",
+			"icon_key": "history",
+			"node_type": "调查结果节点",
+			"location": "档案库 / 训练档案",
+			"time_label": "T-00",
+			"characters": ["你"],
+			"current_goal": "使用“回溯”，返回拆开档案袋之前。",
+			"set_case_state": {
+				"bag_opened": true,
+				"seal_state_preserved": false,
+				"seal_evidence_available": false,
+				"current_bag_route": "opened_directly"
+			},
+			"body": [
+				"你捏住封条边缘，将袋口拉开。",
+				"干透的胶层发出短促的撕裂声。封条下方的纸纤维被一并带起，原本留在袋口上的细微痕迹也被新的裂口覆盖。",
+				"直到这时，你才意识到一个问题。",
+				"如果这只档案袋此前曾经被人打开过，那么现在已经很难区分，哪些痕迹来自过去，哪些痕迹是你刚刚留下的。",
+				"你刚刚的调查行为，改变了档案袋原本的状态。",
+				"调查中的选择可能会改变后续能够取得的信息。",
+				"在之后的案件中，你也会经常遇到类似情况。这个时候，“回溯”功能就能让你回到作出选择之前，尝试另一种调查方式。",
+				"点击顶部的“回溯”，回到拆开档案袋之前。"
+			],
+			"audio_clues": [], "text_clues": [], "room_refs": [], "choices": [],
+			"after_reveal_events": [
+				{"type": "tutorial_backtrack_prompt", "delay": 0.4}
+			],
+			"autosave": false
+		},
+		{
+			"node_id": "tutorial_0013",
+			"title": "检查档案袋",
+			"icon_key": "investigation",
+			"node_type": "调查节点",
+			"location": "档案库 / 训练档案",
+			"time_label": "T-00",
+			"characters": ["你"],
+			"current_goal": "记录关键词“胶痕”。",
+			"set_case_state": {"current_bag_route": "inspected_first"},
+			"body": [
+				"你没有立刻碰触封条，而是先把档案袋转向窗边的光线。",
+				"袋口的胶层已经压平，边缘却留着一道不自然的浅色胶痕。它没有顺着纸张纤维延伸，更像是胶面被揭开后，又重新压回去时留下的痕迹。",
+				"这看起来是一个很关键的线索。",
+				"我先把它记录下来。"
+			],
+			"audio_clues": [], "text_clues": [], "room_refs": [], "choices": [],
+			"after_reveal_events": [
+				{
+					"type": "keyword_tutorial",
+					"delay": 0.5,
+					"title": "记录关键词",
+					"body": "调查材料中可能隐藏着能够继续推理的信息。点击正文中带下划线的文字，将“胶痕”记录为关键词。\n\n后续调查中的关键词不会始终被标记出来，需要你根据材料内容自行判断。"
 				}
 			],
 			"autosave": true

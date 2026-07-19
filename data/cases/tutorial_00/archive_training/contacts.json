@@ -3,7 +3,8 @@
 		{
 			"id": "assistant",
 			"display_name": "调查助理",
-			"icon_key": "phone"
+			"icon_key": "phone",
+			"voice_profile_id": "assistant"
 		},
 		{
 			"id": "police_contact",

@@ -4,11 +4,10 @@ class_name PhoneManager
 signal state_changed
 signal call_ended(next_node_id: String)
 signal feedback_requested(message: String)
+signal transcript_character_revealed(profile_id: String, character: String)
 
-const TRANSCRIPT_BASE_DELAY := 0.45
-const TRANSCRIPT_SECONDS_PER_CHARACTER := 0.055
-const TRANSCRIPT_MINIMUM_DELAY := 0.75
-const TRANSCRIPT_MAXIMUM_DELAY := 4.5
+const TRANSCRIPT_PRE_DELAY := 0.30
+const TRANSCRIPT_CHARACTERS_PER_SECOND := 23.0
 
 var data_loader := PhoneDataLoader.new()
 var runtime_state: CaseRuntimeState
@@ -36,14 +35,18 @@ func update(delta: float) -> void:
 	if runtime_state == null or runtime_state.active_call.is_empty() or delta <= 0.0:
 		return
 	var active := runtime_state.active_call
-	if str(active.get("status", "")) != "active" or not bool(active.get("is_waiting_message", false)):
+	if str(active.get("status", "")) != "active":
 		return
-	var total := maxf(0.0, float(active.get("transcript_delay_total", 0.0)))
-	var elapsed := minf(total, maxf(0.0, float(active.get("transcript_delay_elapsed", 0.0))) + delta)
-	active["transcript_delay_elapsed"] = elapsed
-	runtime_state.active_call = active
-	if elapsed >= total:
-		_reveal_pending_message()
+	if bool(active.get("is_waiting_message", false)):
+		var total := maxf(0.0, float(active.get("transcript_delay_total", TRANSCRIPT_PRE_DELAY)))
+		var elapsed := minf(total, maxf(0.0, float(active.get("transcript_delay_elapsed", 0.0))) + delta)
+		active["transcript_delay_elapsed"] = elapsed
+		runtime_state.active_call = active
+		if elapsed >= total:
+			_begin_pending_message_reveal()
+		return
+	if int(active.get("revealing_transcript_index", -1)) >= 0 and not bool(active.get("message_reveal_completed", true)):
+		_advance_message_reveal(delta)
 
 
 func begin_available_incoming_call() -> bool:
@@ -53,6 +56,17 @@ func begin_available_incoming_call() -> bool:
 		if str(call_data.get("direction", "")) == "incoming" and _conditions_match(call_data.get("start_conditions", {})):
 			return _begin_call(call_data, "incoming")
 	return false
+
+
+func begin_incoming_call(call_id: String) -> bool:
+	if not _configured or runtime_state == null or not runtime_state.active_call.is_empty():
+		return false
+	var call_data := data_loader.get_call(call_id)
+	if call_data.is_empty() or str(call_data.get("direction", "")) != "incoming":
+		return false
+	if not _conditions_match(call_data.get("start_conditions", {})):
+		return false
+	return _begin_call(call_data, "incoming")
 
 
 func answer_incoming_call() -> void:
@@ -66,6 +80,16 @@ func answer_incoming_call() -> void:
 	active["choices_made"] = []
 	active["presented_choices"] = []
 	active["waiting_for_keyword"] = ""
+	active["revealing_message_id"] = ""
+	active["revealing_transcript_index"] = -1
+	active["message_visible_characters"] = 0
+	active["message_reveal_elapsed"] = 0.0
+	active["message_reveal_completed"] = true
+	active["voice_profile_id"] = ""
+	active["pending_choice_id"] = ""
+	active["pending_choice_next"] = ""
+	active["pending_choice_end_call"] = false
+	active["pending_choice_effects"] = []
 	runtime_state.active_call = active
 	_schedule_message(entry_message_id)
 
@@ -98,10 +122,14 @@ func choose(choice_id: String) -> void:
 		push_warning("PhoneManager: ignored unavailable choice: " + choice_id)
 		return
 	var transcript: Array = active.get("transcript", [])
+	var player_text := str(selected.get("text", ""))
 	transcript.append({
 		"speaker": "player",
-		"text": str(selected.get("text", "")),
-		"message_id": str(active.get("message_id", ""))
+		"text": player_text,
+		"message_id": "choice:" + choice_id,
+		"keywords": [],
+		"visible_characters": 0,
+		"reveal_completed": false
 	})
 	var choices_made: Array = active.get("choices_made", [])
 	choices_made.append({
@@ -112,13 +140,18 @@ func choose(choice_id: String) -> void:
 	active["choices_made"] = choices_made
 	active["presented_choices"] = []
 	active["waiting_for_keyword"] = ""
+	active["revealing_message_id"] = "choice:" + choice_id
+	active["revealing_transcript_index"] = transcript.size() - 1
+	active["message_visible_characters"] = 0
+	active["message_reveal_elapsed"] = 0.0
+	active["message_reveal_completed"] = false
+	active["voice_profile_id"] = "player"
+	active["pending_choice_id"] = choice_id
+	active["pending_choice_next"] = str(selected.get("next", ""))
+	active["pending_choice_end_call"] = bool(selected.get("end_call", false))
+	active["pending_choice_effects"] = (selected.get("effects", []) as Array).duplicate(true) if selected.get("effects", []) is Array else []
 	runtime_state.active_call = active
-	_apply_choice_effects(selected)
 	state_changed.emit()
-	if bool(selected.get("end_call", false)):
-		_finish_current_call()
-		return
-	_schedule_message(str(selected.get("next", "")))
 
 
 func notify_keyword_completed(keyword_id: String) -> void:
@@ -182,7 +215,7 @@ func get_discovered_contact_data() -> Array[Dictionary]:
 
 func get_transcript_delay_for_message(message_id: String) -> float:
 	var message := data_loader.get_message(message_id)
-	return _calculate_transcript_delay(str(message.get("text", ""))) if not message.is_empty() else 0.0
+	return TRANSCRIPT_PRE_DELAY if not message.is_empty() else 0.0
 
 
 func refresh_after_runtime_restore() -> void:
@@ -212,7 +245,17 @@ func _begin_call(call_data: Dictionary, direction: String) -> bool:
 		"is_waiting_message": false,
 		"pending_message_id": "",
 		"transcript_delay_elapsed": 0.0,
-		"transcript_delay_total": 0.0
+		"transcript_delay_total": 0.0,
+		"revealing_message_id": "",
+		"revealing_transcript_index": -1,
+		"message_visible_characters": 0,
+		"message_reveal_elapsed": 0.0,
+		"message_reveal_completed": true,
+		"voice_profile_id": "",
+		"pending_choice_id": "",
+		"pending_choice_next": "",
+		"pending_choice_end_call": false,
+		"pending_choice_effects": []
 	}
 	state_changed.emit()
 	return true
@@ -230,14 +273,20 @@ func _schedule_message(message_id: String) -> void:
 	active["is_waiting_message"] = true
 	active["pending_message_id"] = message_id
 	active["transcript_delay_elapsed"] = 0.0
-	active["transcript_delay_total"] = _calculate_transcript_delay(str(message.get("text", "")))
+	active["transcript_delay_total"] = TRANSCRIPT_PRE_DELAY
 	active["presented_choices"] = []
 	active["waiting_for_keyword"] = ""
+	active["revealing_message_id"] = ""
+	active["revealing_transcript_index"] = -1
+	active["message_visible_characters"] = 0
+	active["message_reveal_elapsed"] = 0.0
+	active["message_reveal_completed"] = true
+	active["voice_profile_id"] = ""
 	runtime_state.active_call = active
 	state_changed.emit()
 
 
-func _reveal_pending_message() -> void:
+func _begin_pending_message_reveal() -> void:
 	var active := runtime_state.active_call
 	var message_id := str(active.get("pending_message_id", ""))
 	var message := data_loader.get_message(message_id)
@@ -251,18 +300,99 @@ func _reveal_pending_message() -> void:
 	active["transcript_delay_total"] = 0.0
 	active["message_id"] = message_id
 	var transcript: Array = active.get("transcript", [])
+	var speaker := str(message.get("speaker", "assistant"))
 	transcript.append({
-		"speaker": str(message.get("speaker", "assistant")),
+		"speaker": speaker,
 		"text": str(message.get("text", "")),
 		"message_id": message_id,
-		"keywords": (message.get("keywords", []) as Array).duplicate(true) if message.get("keywords", []) is Array else []
+		"keywords": (message.get("keywords", []) as Array).duplicate(true) if message.get("keywords", []) is Array else [],
+		"visible_characters": 0,
+		"reveal_completed": false
 	})
 	active["transcript"] = transcript
 	active["presented_choices"] = []
+	active["waiting_for_keyword"] = ""
+	active["revealing_message_id"] = message_id
+	active["revealing_transcript_index"] = transcript.size() - 1
+	active["message_visible_characters"] = 0
+	active["message_reveal_elapsed"] = 0.0
+	active["message_reveal_completed"] = false
+	active["voice_profile_id"] = _voice_profile_for_speaker(speaker, active)
+	runtime_state.active_call = active
+	state_changed.emit()
+
+
+func _advance_message_reveal(delta: float) -> void:
+	var active := runtime_state.active_call
+	var transcript: Array = active.get("transcript", [])
+	var transcript_index := int(active.get("revealing_transcript_index", -1))
+	if transcript_index < 0 or transcript_index >= transcript.size() or not (transcript[transcript_index] is Dictionary):
+		active["message_reveal_completed"] = true
+		active["revealing_transcript_index"] = -1
+		runtime_state.active_call = active
+		return
+	var entry: Dictionary = transcript[transcript_index]
+	var text := str(entry.get("text", ""))
+	var visible := clampi(int(active.get("message_visible_characters", 0)), 0, text.length())
+	var elapsed := maxf(0.0, float(active.get("message_reveal_elapsed", 0.0)))
+	var remaining := delta
+	var changed := false
+	while visible < text.length() and remaining > 0.0:
+		var character := text.substr(visible, 1)
+		var interval := 1.0 / TRANSCRIPT_CHARACTERS_PER_SECOND + _transcript_punctuation_pause(character)
+		var required := maxf(0.0, interval - elapsed)
+		if remaining < required:
+			elapsed += remaining
+			remaining = 0.0
+			break
+		remaining -= required
+		elapsed = 0.0
+		visible += 1
+		changed = true
+		transcript_character_revealed.emit(str(active.get("voice_profile_id", "neutral")), character)
+	active["message_visible_characters"] = visible
+	active["message_reveal_elapsed"] = elapsed
+	entry["visible_characters"] = visible
+	transcript[transcript_index] = entry
+	active["transcript"] = transcript
+	runtime_state.active_call = active
+	if changed:
+		state_changed.emit()
+	if visible >= text.length():
+		_complete_current_message_reveal()
+
+
+func _complete_current_message_reveal() -> void:
+	var active := runtime_state.active_call
+	var transcript: Array = active.get("transcript", [])
+	var transcript_index := int(active.get("revealing_transcript_index", -1))
+	if transcript_index < 0 or transcript_index >= transcript.size() or not (transcript[transcript_index] is Dictionary):
+		return
+	var entry: Dictionary = transcript[transcript_index]
+	entry["visible_characters"] = str(entry.get("text", "")).length()
+	entry["reveal_completed"] = true
+	transcript[transcript_index] = entry
+	active["transcript"] = transcript
+	active["message_visible_characters"] = int(entry.get("visible_characters", 0))
+	active["message_reveal_elapsed"] = 0.0
+	active["message_reveal_completed"] = true
+	active["revealing_transcript_index"] = -1
+	active["revealing_message_id"] = ""
+	active["voice_profile_id"] = ""
+	runtime_state.active_call = active
+	state_changed.emit()
+	if str(entry.get("speaker", "")) == "player":
+		_complete_player_choice_reveal()
+		return
+	var message_id := str(entry.get("message_id", ""))
+	var message := data_loader.get_message(message_id)
+	if message.is_empty():
+		interrupt_current_call()
+		return
+	active = runtime_state.active_call
 	active["waiting_for_keyword"] = str(message.get("wait_for_keyword", ""))
 	var choices_value: Variant = message.get("choices", [])
-	if choices_value is Array:
-		active["presented_choices"] = (choices_value as Array).duplicate(true)
+	active["presented_choices"] = (choices_value as Array).duplicate(true) if choices_value is Array else []
 	runtime_state.active_call = active
 	state_changed.emit()
 	if bool(message.get("end_call", false)):
@@ -273,33 +403,41 @@ func _reveal_pending_message() -> void:
 	_schedule_message(str(message.get("next", "")))
 
 
-func _calculate_transcript_delay(text: String) -> float:
-	var visible_text := text
-	var bbcode_regex := RegEx.new()
-	if bbcode_regex.compile("\\[[^\\]]*\\]") == OK:
-		visible_text = bbcode_regex.sub(visible_text, "", true)
-	var visible_character_count := 0
-	var punctuation_delay := 0.0
-	for index in range(visible_text.length()):
-		var character := visible_text.substr(index, 1)
-		var code := visible_text.unicode_at(index)
-		if code < 32 and character != "\n":
-			continue
-		visible_character_count += 1
-		match character:
-			"，", "：":
-				punctuation_delay += 0.10
-			"。", "？", "！":
-				punctuation_delay += 0.20
-			"\n":
-				punctuation_delay += 0.25
-	return clampf(
-		TRANSCRIPT_BASE_DELAY
-		+ float(visible_character_count) * TRANSCRIPT_SECONDS_PER_CHARACTER
-		+ punctuation_delay,
-		TRANSCRIPT_MINIMUM_DELAY,
-		TRANSCRIPT_MAXIMUM_DELAY
-	)
+func _complete_player_choice_reveal() -> void:
+	var active := runtime_state.active_call
+	var pending_choice := {
+		"effects": (active.get("pending_choice_effects", []) as Array).duplicate(true) if active.get("pending_choice_effects", []) is Array else []
+	}
+	var next_id := str(active.get("pending_choice_next", ""))
+	var end_call := bool(active.get("pending_choice_end_call", false))
+	active["pending_choice_id"] = ""
+	active["pending_choice_next"] = ""
+	active["pending_choice_end_call"] = false
+	active["pending_choice_effects"] = []
+	runtime_state.active_call = active
+	_apply_choice_effects(pending_choice)
+	if end_call:
+		_finish_current_call()
+	elif next_id != "":
+		_schedule_message(next_id)
+
+
+func _voice_profile_for_speaker(speaker: String, active: Dictionary) -> String:
+	if speaker == "player":
+		return "player"
+	var contact := data_loader.get_contact(str(active.get("contact_id", "")))
+	return str(contact.get("voice_profile_id", speaker if speaker != "" else "neutral"))
+
+
+func _transcript_punctuation_pause(character: String) -> float:
+	match character:
+		"，", "、", "：", "；":
+			return 0.04
+		"。", "？", "！":
+			return 0.10
+		"\n":
+			return 0.12
+	return 0.0
 
 
 func _finish_current_call() -> void:
@@ -366,7 +504,7 @@ func _validate_restored_call() -> void:
 		return
 	active["is_waiting_message"] = bool(active.get("is_waiting_message", false))
 	active["pending_message_id"] = pending_message_id
-	active["transcript_delay_total"] = maxf(0.0, float(active.get("transcript_delay_total", 0.0)))
+	active["transcript_delay_total"] = TRANSCRIPT_PRE_DELAY if bool(active.get("is_waiting_message", false)) else 0.0
 	active["transcript_delay_elapsed"] = clampf(
 		float(active.get("transcript_delay_elapsed", 0.0)),
 		0.0,
@@ -374,4 +512,27 @@ func _validate_restored_call() -> void:
 	)
 	if bool(active.get("is_waiting_message", false)) and pending_message_id == "":
 		active["is_waiting_message"] = false
+	var transcript: Array = active.get("transcript", [])
+	for transcript_index in range(transcript.size()):
+		if not (transcript[transcript_index] is Dictionary):
+			continue
+		var entry: Dictionary = transcript[transcript_index]
+		if not entry.has("reveal_completed"):
+			entry["reveal_completed"] = true
+			entry["visible_characters"] = str(entry.get("text", "")).length()
+		transcript[transcript_index] = entry
+	active["transcript"] = transcript
+	var revealing_index := int(active.get("revealing_transcript_index", -1))
+	if revealing_index < 0 or revealing_index >= transcript.size():
+		revealing_index = -1
+	active["revealing_transcript_index"] = revealing_index
+	active["revealing_message_id"] = str(active.get("revealing_message_id", "")) if revealing_index >= 0 else ""
+	active["message_visible_characters"] = maxi(0, int(active.get("message_visible_characters", 0)))
+	active["message_reveal_elapsed"] = maxf(0.0, float(active.get("message_reveal_elapsed", 0.0)))
+	active["message_reveal_completed"] = bool(active.get("message_reveal_completed", revealing_index < 0))
+	active["voice_profile_id"] = str(active.get("voice_profile_id", ""))
+	active["pending_choice_id"] = str(active.get("pending_choice_id", ""))
+	active["pending_choice_next"] = str(active.get("pending_choice_next", ""))
+	active["pending_choice_end_call"] = bool(active.get("pending_choice_end_call", false))
+	active["pending_choice_effects"] = (active.get("pending_choice_effects", []) as Array).duplicate(true) if active.get("pending_choice_effects", []) is Array else []
 	runtime_state.active_call = active

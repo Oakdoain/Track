@@ -1,0 +1,31 @@
+{
+	"profiles": {
+		"neutral": {
+			"waveform": "triangle",
+			"base_frequency": 430.0,
+			"frequency_variants": [0.96, 1.0, 1.05],
+			"duration_ms": 46,
+			"characters_per_blip": 2,
+			"minimum_interval_ms": 70,
+			"volume_db": -28.0
+		},
+		"assistant": {
+			"waveform": "triangle",
+			"base_frequency": 520.0,
+			"frequency_variants": [0.94, 1.0, 1.06, 1.11],
+			"duration_ms": 48,
+			"characters_per_blip": 2,
+			"minimum_interval_ms": 65,
+			"volume_db": -27.0
+		},
+		"player": {
+			"waveform": "sine_triangle",
+			"base_frequency": 340.0,
+			"frequency_variants": [0.96, 1.0, 1.04],
+			"duration_ms": 52,
+			"characters_per_blip": 3,
+			"minimum_interval_ms": 75,
+			"volume_db": -29.0
+		}
+	}
+}

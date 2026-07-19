@@ -20,33 +20,45 @@ static func calculate(
 	var source_order: Dictionary = {}
 	var outgoing: Dictionary = {}
 	var incoming: Dictionary = {}
+	var node_to_slot: Dictionary = {}
 
 	for index in range(nodes.size()):
 		var node: Dictionary = nodes[index]
 		var node_id: String = str(node.get("node_id", ""))
+		var slot_id: String = str(node.get("graph_slot_id", node_id))
 
-		if node_id == "" or node_by_id.has(node_id):
+		if node_id == "" or slot_id == "":
 			continue
+		node_to_slot[node_id] = slot_id
+		if not node_by_id.has(slot_id):
+			var representative := node.duplicate(true)
+			representative["node_id"] = slot_id
+			node_by_id[slot_id] = representative
+			source_order[slot_id] = index
+			outgoing[slot_id] = []
+			incoming[slot_id] = []
 
-		node_by_id[node_id] = node
-		source_order[node_id] = index
-		outgoing[node_id] = []
-		incoming[node_id] = []
-
-	for node_id_value in node_by_id.keys():
-		var node_id: String = str(node_id_value)
-		var targets: Array[String] = _node_targets(node_by_id[node_id] as Dictionary, node_by_id)
-		outgoing[node_id] = targets
+	for node in nodes:
+		var actual_id := str(node.get("node_id", ""))
+		if actual_id == "" or not node_to_slot.has(actual_id):
+			continue
+		var node_id := str(node_to_slot[actual_id])
+		var targets: Array[String] = _node_targets(node, node_to_slot)
+		for target_id in targets:
+			if not (outgoing[node_id] as Array).has(target_id):
+				(outgoing[node_id] as Array).append(target_id)
 
 		for target_id in targets:
-			(incoming[target_id] as Array).append(node_id)
+			if incoming.has(target_id) and not (incoming[target_id] as Array).has(node_id):
+				(incoming[target_id] as Array).append(node_id)
 
 	var depths: Dictionary = {}
 	var queue: Array[String] = []
 
-	if node_by_id.has(initial_node_id):
-		depths[initial_node_id] = 0
-		queue.append(initial_node_id)
+	var initial_slot_id := str(node_to_slot.get(initial_node_id, initial_node_id))
+	if node_by_id.has(initial_slot_id):
+		depths[initial_slot_id] = 0
+		queue.append(initial_slot_id)
 
 	var queue_index := 0
 
@@ -75,7 +87,8 @@ static func calculate(
 	var max_depth := 0
 
 	for visible_id_value in visible_nodes.keys():
-		var visible_id: String = str(visible_id_value)
+		var raw_visible_id: String = str(visible_id_value)
+		var visible_id: String = str(node_to_slot.get(raw_visible_id, raw_visible_id))
 
 		if not node_by_id.has(visible_id):
 			continue
@@ -86,7 +99,15 @@ static func calculate(
 		if not layers.has(depth):
 			layers[depth] = []
 
-		(layers[depth] as Array).append(visible_id)
+		if not (layers[depth] as Array).has(visible_id):
+			(layers[depth] as Array).append(visible_id)
+
+	var slot_sizes: Dictionary = {}
+	for size_id_value in node_sizes.keys():
+		var size_id := str(size_id_value)
+		var size_slot := str(node_to_slot.get(size_id, size_id))
+		if not slot_sizes.has(size_slot):
+			slot_sizes[size_slot] = node_sizes[size_id_value]
 
 	for depth_value in layers.keys():
 		(layers[depth_value] as Array).sort_custom(func(a: Variant, b: Variant) -> bool:
@@ -109,7 +130,7 @@ static func calculate(
 	var layer_widths: Dictionary = {}
 
 	for depth_value in layers.keys():
-		var width := _layer_width(layers[depth_value] as Array, node_sizes)
+		var width := _layer_width(layers[depth_value] as Array, slot_sizes)
 		layer_widths[depth_value] = width
 		widest_layer = maxf(widest_layer, width)
 
@@ -128,21 +149,22 @@ static func calculate(
 
 		for node_id_value in layer:
 			var node_id: String = str(node_id_value)
-			var node_size: Vector2 = node_sizes.get(node_id, DEFAULT_NODE_SIZE)
+			var node_size: Vector2 = slot_sizes.get(node_id, DEFAULT_NODE_SIZE)
 			positions[node_id] = Vector2(x, y)
 			x += node_size.x + HORIZONTAL_GAP
 			max_bottom = maxf(max_bottom, y + node_size.y)
 
 	return {
 		"positions": positions,
-		"sizes": node_sizes.duplicate(true),
+		"sizes": slot_sizes,
 		"depths": depths,
 		"outgoing": outgoing,
+		"node_to_slot": node_to_slot,
 		"canvas_size": Vector2(canvas_width, maxf(MIN_CANVAS_SIZE.y, max_bottom + BOTTOM_MARGIN))
 	}
 
 
-static func _node_targets(node: Dictionary, node_by_id: Dictionary) -> Array[String]:
+static func _node_targets(node: Dictionary, node_to_slot: Dictionary) -> Array[String]:
 	var targets: Array[String] = []
 	var choices: Variant = node.get("choices", [])
 
@@ -153,8 +175,10 @@ static func _node_targets(node: Dictionary, node_by_id: Dictionary) -> Array[Str
 
 			var target_id: String = str((choice as Dictionary).get("to", ""))
 
-			if target_id != "" and node_by_id.has(target_id) and not targets.has(target_id):
-				targets.append(target_id)
+			if target_id != "" and node_to_slot.has(target_id):
+				var target_slot := str(node_to_slot[target_id])
+				if not targets.has(target_slot):
+					targets.append(target_slot)
 
 	var graph_targets: Variant = node.get("graph_targets", [])
 
@@ -162,8 +186,10 @@ static func _node_targets(node: Dictionary, node_by_id: Dictionary) -> Array[Str
 		for target_value in graph_targets:
 			var target_id: String = str(target_value)
 
-			if target_id != "" and node_by_id.has(target_id) and not targets.has(target_id):
-				targets.append(target_id)
+			if target_id != "" and node_to_slot.has(target_id):
+				var target_slot := str(node_to_slot[target_id])
+				if not targets.has(target_slot):
+					targets.append(target_slot)
 
 	return targets
 

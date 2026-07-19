@@ -25,12 +25,14 @@ const C_SCROLL_IDLE := Color("#9AADE8")
 const C_SCROLL_PRESSED := Color("#0B2F87")
 const PHONE_BUTTON_SIZE := Vector2(56.0, 56.0)
 const PHONE_ICON_SIZE := Vector2(24.0, 24.0)
-const ACCEPT_ICON_OPTICAL_OFFSET := Vector2(1.0, 0.0)
-const REJECT_ICON_OPTICAL_OFFSET := Vector2(2.0, 0.0)
+const ACCEPT_ICON_OPTICAL_OFFSET := Vector2(-1.0, 1.0)
+const REJECT_ICON_OPTICAL_OFFSET := Vector2(-2.0, 1.0)
+const CALLING_DOT_INTERVAL := 0.4
+const CALLING_DOT_MAX := 6
+const REVEAL_SCROLL_INTERVAL_MSEC := 70
 const TRANSCRIPT_SCROLL_HIT_WIDTH := 9.0
 const TRANSCRIPT_SCROLL_IDLE_WIDTH := 4
 const TRANSCRIPT_SCROLL_ACTIVE_WIDTH := 6
-const TRANSCRIPT_BOTTOM_MARGIN := 16
 const REPLY_HEIGHT_DEFAULT := 200.0
 const REPLY_HEIGHT_COMPACT := 160.0
 const COMPACT_VIEW_HEIGHT := 650.0
@@ -46,6 +48,7 @@ var _active_call_view: Control
 var _active_contact_name: Label
 var _scroll: ScrollContainer
 var _message_list: VBoxContainer
+var _message_views: Array[PhoneMessageView] = []
 var _transcribing_label: Label
 var _reply_area: Control
 var _reply_prompt: Label
@@ -56,10 +59,24 @@ var _choice_signature: String = ""
 var _choice_input_locked: bool = false
 var _scroll_request_generation: int = 0
 var _suspend_scroll_requests: bool = false
+var _calling_animation_active: bool = false
+var _calling_dot_count: int = 1
+var _calling_dot_elapsed: float = 0.0
+var _last_reveal_scroll_msec: int = -REVEAL_SCROLL_INTERVAL_MSEC
 
 
 func _ready() -> void:
 	_build()
+
+
+func _process(delta: float) -> void:
+	if not _calling_animation_active or delta <= 0.0:
+		return
+	_calling_dot_elapsed += delta
+	while _calling_dot_elapsed >= CALLING_DOT_INTERVAL:
+		_calling_dot_elapsed -= CALLING_DOT_INTERVAL
+		_calling_dot_count = (_calling_dot_count % CALLING_DOT_MAX) + 1
+		_update_calling_status_text()
 
 
 func render_call(active_call: Dictionary, contact: Dictionary) -> void:
@@ -78,27 +95,47 @@ func render_call(active_call: Dictionary, contact: Dictionary) -> void:
 	_incoming_call_view.visible = incoming
 	_active_call_view.visible = not incoming
 	_incoming_contact_name.text = contact_name
-	_incoming_status.text = "正在呼叫……"
 	_active_contact_name.text = contact_name
 	if incoming:
+		_start_calling_animation()
 		_render_incoming_state()
 		return
+	_stop_calling_animation()
 	_suspend_scroll_requests = true
+	var structural_change := false
+	var reveal_changed := false
+	var reveal_completed := false
+	var had_indicator := _transcribing_label != null and is_instance_valid(_transcribing_label)
 	_remove_transcribing_indicator()
 	var transcript_value: Variant = active_call.get("transcript", [])
 	var transcript: Array = transcript_value if transcript_value is Array else []
 	if transcript.size() < _rendered_message_count:
 		_clear_message_list()
+		structural_change = true
 	for index in range(_rendered_message_count, transcript.size()):
 		var entry_value: Variant = transcript[index]
 		if entry_value is Dictionary:
 			_append_message(entry_value as Dictionary)
+			structural_change = true
 	_rendered_message_count = transcript.size()
+	for index in range(mini(transcript.size(), _message_views.size())):
+		if not (transcript[index] is Dictionary):
+			continue
+		var entry: Dictionary = transcript[index]
+		var completed := bool(entry.get("reveal_completed", true))
+		if _message_views[index].set_reveal_progress(int(entry.get("visible_characters", str(entry.get("text", "")).length())), completed):
+			reveal_changed = true
+			reveal_completed = reveal_completed or completed
 	if bool(active_call.get("is_waiting_message", false)):
 		_add_transcribing_indicator()
+	var has_indicator := _transcribing_label != null and is_instance_valid(_transcribing_label)
+	structural_change = structural_change or had_indicator != has_indicator
 	_render_choices(active_call)
 	_suspend_scroll_requests = false
-	request_scroll_to_bottom()
+	if structural_change or reveal_completed:
+		request_scroll_to_bottom()
+	elif reveal_changed:
+		_request_reveal_scroll_to_bottom()
 
 
 func clear_call() -> void:
@@ -106,6 +143,7 @@ func clear_call() -> void:
 	_rendered_message_count = 0
 	_choice_signature = ""
 	_choice_input_locked = false
+	_stop_calling_animation()
 	_scroll_request_generation += 1
 	_suspend_scroll_requests = true
 	if _message_list != null:
@@ -173,8 +211,9 @@ func _build_incoming_view() -> void:
 	_incoming_contact_name.name = "ContactName"
 	_incoming_contact_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	center.add_child(_incoming_contact_name)
-	_incoming_status = _label("正在呼叫……", 16, C_SUBTEXT, FONT_SERIF_REGULAR)
+	_incoming_status = _label("正在呼叫.", 16, C_SUBTEXT, FONT_SERIF_REGULAR)
 	_incoming_status.name = "CallingStatus"
+	_incoming_status.custom_minimum_size.x = ceilf(FONT_SERIF_REGULAR.get_string_size("正在呼叫......", HORIZONTAL_ALIGNMENT_LEFT, -1.0, 16).x)
 	_incoming_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	center.add_child(_incoming_status)
 	var middle_spacer := Control.new()
@@ -231,17 +270,23 @@ func _build_active_view() -> void:
 	transcript_status.name = "TranscriptStatus"
 	header.add_child(transcript_status)
 	var header_separator := HSeparator.new()
-	header_separator.name = "HeaderSeparator"
+	header_separator.name = "TopSeparator"
 	header_separator.add_theme_stylebox_override("separator", _style(C_LINE, C_LINE, 1, 0))
 	layout.add_child(header_separator)
+	var transcript_clip_root := Control.new()
+	transcript_clip_root.name = "TranscriptClipRoot"
+	transcript_clip_root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	transcript_clip_root.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	transcript_clip_root.clip_contents = true
+	layout.add_child(transcript_clip_root)
 	var transcript_margin := MarginContainer.new()
 	transcript_margin.name = "TranscriptArea"
-	transcript_margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	transcript_margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	transcript_margin.add_theme_constant_override("margin_left", 14)
 	transcript_margin.add_theme_constant_override("margin_right", 0)
-	transcript_margin.add_theme_constant_override("margin_top", 10)
-	transcript_margin.add_theme_constant_override("margin_bottom", 10)
-	layout.add_child(transcript_margin)
+	transcript_margin.add_theme_constant_override("margin_top", 0)
+	transcript_margin.add_theme_constant_override("margin_bottom", 0)
+	transcript_clip_root.add_child(transcript_margin)
 	_scroll = ScrollContainer.new()
 	_scroll.name = "TranscriptScroll"
 	_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -254,7 +299,8 @@ func _build_active_view() -> void:
 	message_margin.name = "MessageContentMargin"
 	message_margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	message_margin.add_theme_constant_override("margin_right", 14)
-	message_margin.add_theme_constant_override("margin_bottom", TRANSCRIPT_BOTTOM_MARGIN)
+	message_margin.add_theme_constant_override("margin_top", 0)
+	message_margin.add_theme_constant_override("margin_bottom", 0)
 	_scroll.add_child(message_margin)
 	_message_list = VBoxContainer.new()
 	_message_list.name = "MessageList"
@@ -272,7 +318,7 @@ func _build_reply_area(parent: VBoxContainer) -> void:
 	_reply_area.add_theme_constant_override("separation", 0)
 	parent.add_child(_reply_area)
 	var separator := HSeparator.new()
-	separator.name = "ReplySeparator"
+	separator.name = "BottomSeparator"
 	separator.add_theme_stylebox_override("separator", _style(C_LINE, C_LINE, 1, 0))
 	_reply_area.add_child(separator)
 	var reply_margin := MarginContainer.new()
@@ -315,8 +361,9 @@ func _append_message(entry: Dictionary) -> void:
 	var message_view := PhoneMessageViewScript.new() as PhoneMessageView
 	message_view.configure(entry)
 	message_view.keyword_pressed.connect(_forward_keyword_pressed)
-	message_view.layout_changed.connect(request_scroll_to_bottom)
+	message_view.layout_changed.connect(_request_reveal_scroll_to_bottom)
 	_message_list.add_child(message_view)
+	_message_views.append(message_view)
 	request_scroll_to_bottom()
 
 
@@ -490,6 +537,44 @@ func _remove_transcribing_indicator() -> void:
 		request_scroll_to_bottom()
 
 
+func _start_calling_animation() -> void:
+	if _calling_animation_active:
+		return
+	_calling_animation_active = true
+	_calling_dot_count = 1
+	_calling_dot_elapsed = 0.0
+	_update_calling_status_text()
+
+
+func _stop_calling_animation() -> void:
+	_calling_animation_active = false
+	_calling_dot_count = 1
+	_calling_dot_elapsed = 0.0
+
+
+func _update_calling_status_text() -> void:
+	if _incoming_status != null:
+		_incoming_status.text = "正在呼叫" + ".".repeat(_calling_dot_count)
+
+
+func _request_reveal_scroll_to_bottom() -> void:
+	if _scroll == null or _suspend_scroll_requests:
+		return
+	var now := Time.get_ticks_msec()
+	if now - _last_reveal_scroll_msec < REVEAL_SCROLL_INTERVAL_MSEC:
+		return
+	_last_reveal_scroll_msec = now
+	call_deferred("_apply_reveal_scroll_after_layout")
+
+
+func _apply_reveal_scroll_after_layout() -> void:
+	if not is_inside_tree() or not is_instance_valid(_scroll):
+		return
+	await get_tree().process_frame
+	if is_instance_valid(_scroll):
+		_apply_transcript_scroll_to_bottom()
+
+
 func request_scroll_to_bottom() -> void:
 	if _scroll == null or _suspend_scroll_requests:
 		return
@@ -554,6 +639,7 @@ func _update_reply_height() -> void:
 func _clear_message_list() -> void:
 	_remove_transcribing_indicator()
 	_clear_children(_message_list)
+	_message_views.clear()
 	_rendered_message_count = 0
 
 

@@ -3,6 +3,9 @@
 	"nodes": {
 		"tutorial_0000": [820, 40],
 		"tutorial_0001": [820, 210],
+		"tutorial_0012": [820, 390],
+		"tutorial_0012_a": [820, 390],
+		"tutorial_0013": [520, 570],
 		"tutorial_0002a": [300, 390],
 		"tutorial_0002b": [820, 390],
 		"tutorial_0002c": [1340, 390],

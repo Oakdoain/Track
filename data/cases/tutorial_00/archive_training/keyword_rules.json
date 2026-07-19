@@ -8,6 +8,18 @@
 		],
 		"tutorial_0007s": [
 			{"keyword": "封口白痕", "anchor_text": "封口白痕", "occurrence_index": 0}
+		],
+		"tutorial_0013": [
+			{
+				"keyword_id": "tutorial_glue_mark",
+				"keyword": "胶痕",
+				"anchor_text": "胶痕",
+				"occurrence_index": 0,
+				"requires_flags": {
+					"tutorial_keyword_popup_shown": true,
+					"tutorial_glue_mark_recorded": false
+				}
+			}
 		]
 	},
 	"keyword_effects": [
@@ -26,6 +38,16 @@
 					"type": "add_contact",
 					"contact_id": "police_contact"
 				}
+			]
+		},
+		{
+			"keyword_id": "tutorial_glue_mark",
+			"text": "胶痕",
+			"source_scope": ["story_body"],
+			"effects": [
+				{"type": "discover_keyword", "keyword_id": "tutorial_glue_mark"},
+				{"type": "set_flag", "flag_id": "tutorial_keyword_recording_learned", "value": true, "persistent": true},
+				{"type": "set_flag", "flag_id": "tutorial_glue_mark_recorded", "value": true, "persistent": true}
 			]
 		}
 	],

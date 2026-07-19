@@ -49,19 +49,19 @@
 		{
 			"id": "assistant_call_003",
 			"speaker": "assistant",
-			"text": "我不是来提醒你作息的。",
+			"text": "你桌上有一份档案。",
 			"next": "assistant_call_003b"
 		},
 		{
 			"id": "assistant_call_003b",
 			"speaker": "assistant",
-			"text": "你桌上有一份编号 T-00 的训练档案。",
+			"text": "档案室刚才复核时发现，登记内容和现存材料对不上。",
 			"next": "assistant_call_004"
 		},
 		{
 			"id": "assistant_call_004",
 			"speaker": "assistant",
-			"text": "封存登记写的是三页，但档案室复核时发现，里面的材料可能对不上。",
+			"text": "我需要你重新检查一遍，确认究竟发生了什么。",
 			"next": "assistant_call_005"
 		},
 		{
@@ -79,13 +79,13 @@
 		{
 			"id": "assistant_call_006",
 			"speaker": "assistant",
-			"text": "档案袋本身、封存登记，还有袋内材料。调查顺序由你决定。",
+			"text": "档案袋、封存记录，还有里面的材料。先从你认为合适的地方开始。",
 			"next": "assistant_call_007"
 		},
 		{
 			"id": "assistant_call_007",
 			"speaker": "assistant",
-			"text": "另外，你的通讯名单还是空的。以后正式案件需要封锁现场时，要联系警察联络处。",
+			"text": "正式案件里，如果需要封锁现场或者请求协助，就联系警察联络处。有需要的时候，记得打过去。",
 			"keywords": [
 				{
 					"keyword_id": "contact_police",
@@ -99,7 +99,7 @@
 		{
 			"id": "assistant_call_008",
 			"speaker": "assistant",
-			"text": "查完以后，从电话簿打给我。只汇报你真正能够证明的部分。",
+			"text": "先检查桌上的档案。查完之后再联系我。只汇报你真正能够证明的部分。",
 			"choices": [
 				{
 					"id": "inspect_archive_first",
