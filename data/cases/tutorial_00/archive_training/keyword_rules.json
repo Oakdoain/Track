@@ -1,118 +1,102 @@
 {
-	"keyword_presets": {
-		"tutorial_0006": [
-			{"keyword": "页码缺口", "anchor_text": "页码缺口", "occurrence_index": 0}
-		],
-		"tutorial_0007": [
-			{"keyword": "T-00编号", "anchor_text": "T-00编号", "occurrence_index": 0}
-		],
-		"tutorial_0007s": [
-			{"keyword": "封口白痕", "anchor_text": "封口白痕", "occurrence_index": 0}
-		],
-		"tutorial_0013": [
-			{
-				"keyword_id": "tutorial_glue_mark",
-				"keyword": "胶痕",
-				"anchor_text": "胶痕",
-				"occurrence_index": 0,
-				"requires_flags": {
-					"tutorial_keyword_popup_shown": true,
-					"tutorial_glue_mark_recorded": false
-				}
-			}
-		]
-	},
-	"keyword_effects": [
-		{
-			"keyword_id": "contact_police",
-			"text": "警察联络处",
-			"source_scope": [
-				"phone_transcript"
-			],
-			"effects": [
-				{
-					"type": "discover_keyword",
-					"keyword_id": "contact_police"
-				},
-				{
-					"type": "add_contact",
-					"contact_id": "police_contact"
-				}
-			]
-		},
-		{
-			"keyword_id": "tutorial_glue_mark",
-			"text": "胶痕",
-			"source_scope": ["story_body"],
-			"effects": [
-				{"type": "discover_keyword", "keyword_id": "tutorial_glue_mark"},
-				{"type": "set_flag", "flag_id": "tutorial_keyword_recording_learned", "value": true, "persistent": true},
-				{"type": "set_flag", "flag_id": "tutorial_glue_mark_recorded", "value": true, "persistent": true}
-			]
-		}
-	],
-	"keyword_rules": [
-		{
-			"keyword": "页码缺口",
-			"source_nodes": ["tutorial_0006"],
-			"connections": [
-				{
-					"target_node_id": "tutorial_inference_file_change",
-					"outcome": "correct",
-					"unlock_node_ids": ["tutorial_inference_file_change", "tutorial_0007"],
-					"set_flags": {"tutorial_page_connection_completed": true},
-					"autosave_on_success": true,
-					"feedback": "第一页与第三页之间存在连续页码缺口，能够证明当前文件数量与封存登记不一致。"
-				},
-				{
-					"target_node_id": "tutorial_hypothesis_admin",
-					"outcome": "error",
-					"error_node_id": "tutorial_0008e",
-					"requires_flags": {
-						"tutorial_page_connection_completed": true,
-						"tutorial_invalid_connection_seen": true
-					},
-					"feedback": "页码缺口能证明文件数量变化，却不能确认由档案管理员取走第二页。"
-				}
-			]
-		},
-		{
-			"keyword": "T-00编号",
-			"source_nodes": ["tutorial_0007"],
-			"connections": [
-				{
-					"target_node_id": "tutorial_inference_file_change",
-					"outcome": "invalid",
-					"set_flags": {"tutorial_invalid_connection_seen": true},
-					"feedback": "T-00编号只能识别档案，不能证明文件数量发生变化。"
-				}
-			]
-		},
-		{
-			"keyword": "封口白痕",
-			"source_nodes": ["tutorial_0007s"],
-			"connections": [
-				{
-					"target_node_id": "tutorial_inference_seal",
-					"outcome": "correct",
-					"requires_flags": {"tutorial_seal_evidence_found": true},
-					"unlock_node_ids": ["tutorial_inference_seal", "tutorial_0007"],
-					"set_flags": {"tutorial_seal_connection_completed": true},
-					"autosave_on_success": true,
-					"feedback": "拆封前记录的白痕沿原粘合线分布，能够支持原始封口经过再次处理。"
-				},
-				{
-					"target_node_id": "tutorial_hypothesis_admin",
-					"outcome": "error",
-					"error_node_id": "tutorial_0008e",
-					"requires_flags": {
-						"tutorial_page_connection_completed": true,
-						"tutorial_invalid_connection_seen": true,
-						"tutorial_seal_evidence_found": true
-					},
-					"feedback": "封口白痕可以支持封口经过再次处理，却不能确认处理者或缺页责任人。"
-				}
-			]
-		}
-	]
+  "keyword_presets": {
+    "tutorial_0012": [
+      {
+        "keyword_id": "tutorial_thread_fade",
+        "keyword": "线头褪色",
+        "anchor_text": "褪色",
+        "occurrence_index": 0,
+        "requires_flags": {
+          "tutorial_thread_fade_hint_visible": true,
+          "tutorial_thread_fade_recorded": false
+        }
+      }
+    ]
+  },
+  "keyword_effects": [
+    {
+      "keyword_id": "contact_police",
+      "text": "警察联络处",
+      "source_scope": ["phone_transcript"],
+      "effects": [
+        {"type": "discover_keyword", "keyword_id": "contact_police"},
+        {"type": "add_contact", "contact_id": "police_contact"}
+      ]
+    },
+    {
+      "keyword_id": "tutorial_thread_fade",
+      "text": "线头褪色",
+      "match_texts": ["褪色", "线头末端", "线头末端的褪色", "线头褪色"],
+      "source_nodes": ["tutorial_0012"],
+      "source_scope": ["story_body"],
+      "effects": [
+        {"type": "discover_keyword", "keyword_id": "tutorial_thread_fade"},
+        {"type": "set_flag", "flag_id": "tutorial_keyword_recording_learned", "value": true, "persistent": true},
+        {"type": "set_flag", "flag_id": "tutorial_thread_fade_recorded", "value": true}
+      ]
+    },
+    {
+      "keyword_id": "tutorial_witness_statement_missing",
+      "text": "证人陈述记录缺失",
+      "match_texts": [
+        "证人陈述记录",
+        "证人陈述记录并不在档案袋内",
+        "缺少证人陈述记录",
+        "清单中登记的“证人陈述记录”"
+      ],
+      "source_nodes": ["tutorial_0015"],
+      "source_scope": ["story_body"],
+      "effects": [
+        {"type": "discover_keyword", "keyword_id": "tutorial_witness_statement_missing"},
+        {"type": "set_flag", "flag_id": "tutorial_witness_statement_missing_recorded", "value": true}
+      ]
+    }
+  ],
+  "keyword_rules": [
+    {
+      "keyword": "线头褪色",
+      "source_nodes": ["tutorial_0012"],
+      "connections": [
+        {
+          "target_node_id": "tutorial_fact_thread_age_mismatch",
+          "outcome": "correct",
+          "unlock_node_ids": ["tutorial_fact_thread_age_mismatch", "tutorial_fact_seal_anomaly", "tutorial_0014"],
+          "set_flags": {"tutorial_first_graph_relation_completed": true},
+          "next_node_id": "tutorial_0014",
+          "autosave_on_success": true,
+          "feedback": "关系成立。棉线的褪色程度明显低于档案袋本体，可以确认当前封口棉线与档案袋的老化状态并不一致。"
+        },
+        {
+          "target_node_id": "tutorial_hypothesis_archive_date",
+          "outcome": "invalid",
+          "feedback": "这两项信息之间缺少能够直接验证的关系。棉线状态不能单独推翻归档日期。"
+        },
+        {
+          "target_node_id": "tutorial_hypothesis_malicious_damage",
+          "outcome": "invalid",
+          "feedback": "“线头褪色”能够说明封口材料的状态存在异常，但不能证明有人出于恶意破坏了档案袋。"
+        }
+      ]
+    },
+    {
+      "keyword": "证人陈述记录缺失",
+      "source_nodes": ["tutorial_0015"],
+      "connections": [
+        {
+          "target_node_id": "tutorial_fact_material_mismatch",
+          "outcome": "correct",
+          "requires_flags": {"tutorial_first_graph_relation_completed": true},
+          "unlock_node_ids": [
+            "tutorial_fact_material_mismatch",
+            "tutorial_conclusion_supported",
+            "tutorial_conclusion_causal",
+            "tutorial_conclusion_erin"
+          ],
+          "set_flags": {"tutorial_second_graph_relation_completed": true},
+          "autosave_on_success": true,
+          "feedback": "关系成立。归档清单登记了证人陈述记录，但该材料目前不在档案袋内，可以确认现存材料与归档清单不一致。"
+        }
+      ]
+    }
+  ]
 }

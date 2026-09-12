@@ -1,0 +1,53 @@
+{
+  "contacts": [
+    {
+      "id": "assistant",
+      "display_name": "艾琳",
+      "icon_key": "phone",
+      "voice_profile_id": "assistant",
+      "dispatch_executor": "assistant"
+    },
+    {
+      "id": "police_contact",
+      "display_name": "警察联络处",
+      "icon_key": "phone",
+      "dispatch_executor": "police"
+    },
+    {
+      "id": "witness_wang_aunt",
+      "display_name": "王姨",
+      "icon_key": "phone",
+      "availability_text": "可接通",
+      "contact_message": "电话已接通，但当前没有新的可直接询问内容。"
+    },
+    {
+      "id": "manager_zhao_yiming",
+      "display_name": "赵一鸣",
+      "icon_key": "phone",
+      "availability_text": "当前无法联系",
+      "contact_message": "当前无法联系赵一鸣。"
+    },
+    {
+      "id": "singer_lin_wei",
+      "display_name": "林薇",
+      "icon_key": "phone",
+      "availability_text": "暂无法联系",
+      "contact_message": "无人接听。林薇此阶段暂无法联系。"
+    },
+    {
+      "id": "suspect_chen_mo",
+      "display_name": "陈默",
+      "icon_key": "phone",
+      "availability_text": "已关机",
+      "contact_message": "对方已关机，当前无法联系。"
+    }
+  ],
+  "initial_contacts": [
+    "assistant",
+    "police_contact",
+    "witness_wang_aunt",
+    "manager_zhao_yiming",
+    "singer_lin_wei",
+    "suspect_chen_mo"
+  ]
+}

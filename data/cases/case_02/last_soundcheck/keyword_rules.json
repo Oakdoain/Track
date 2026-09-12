@@ -1,0 +1,53 @@
+{
+  "keyword_presets": {},
+  "keyword_effects": [
+    {"keyword_id":"ls_voice_2240","text":"22:40宋言声音","match_texts":["22:40出现宋言声音","22:40宋言声音","宋言的声音"],"source_nodes":["ls_0002"],"source_scope":["story_body"],"effects":[{"type":"discover_keyword","keyword_id":"ls_voice_2240"}]},
+    {"keyword_id":"ls_chen_control_room","text":"陈默一直在控制室","match_texts":["陈默一直在控制室","一直在控制室"],"source_nodes":["ls_0002","ls_p02"],"source_scope":["story_body"],"effects":[{"type":"discover_keyword","keyword_id":"ls_chen_control_room"}]},
+    {"keyword_id":"ls_death_before_2240","text":"死亡早于22:40","match_texts":["死亡明显早于22:40","死亡早于22:40","21:20—22:00"],"source_nodes":["ls_p01"],"source_scope":["story_body"],"effects":[{"type":"discover_keyword","keyword_id":"ls_death_before_2240"}]},
+    {"keyword_id":"ls_2138","text":"21:38","match_texts":["21:38"],"source_nodes":["ls_a02"],"source_scope":["story_body"],"effects":[{"type":"discover_keyword","keyword_id":"ls_2138"}]},
+    {"keyword_id":"ls_abnormal_hum","text":"异常嗡声","match_texts":["异常嗡声"],"source_nodes":["ls_a02"],"source_scope":["story_body"],"effects":[{"type":"discover_keyword","keyword_id":"ls_abnormal_hum"}]},
+    {"keyword_id":"ls_wheel_sound","text":"背景滚轮声","match_texts":["背景滚轮声","滚轮声"],"source_nodes":["ls_a03"],"source_scope":["story_body"],"effects":[{"type":"discover_keyword","keyword_id":"ls_wheel_sound"}]},
+    {"keyword_id":"ls_repeat_segment","text":"重复声音片段","match_texts":["重复声音片段","与前段重复","重复素材"],"source_nodes":["ls_a03"],"source_scope":["story_body"],"effects":[{"type":"discover_keyword","keyword_id":"ls_repeat_segment"}]},
+    {"keyword_id":"ls_cart_signature","text":"清洁车特征声","match_texts":["固定节奏摩擦声","清洁车特征声","相同节奏"],"source_nodes":["ls_a04"],"source_scope":["story_body"],"effects":[{"type":"discover_keyword","keyword_id":"ls_cart_signature"}]},
+    {"keyword_id":"ls_double_door","text":"主录音室隔音","match_texts":["双层隔音门","主录音室隔音"],"source_nodes":["ls_0000","ls_a04"],"source_scope":["story_body"],"effects":[{"type":"discover_keyword","keyword_id":"ls_double_door"}]},
+    {"keyword_id":"ls_playback","text":"Playback Start","match_texts":["Playback Start"],"source_nodes":["ls_p03"],"source_scope":["story_body"],"effects":[{"type":"discover_keyword","keyword_id":"ls_playback"}]},
+    {"keyword_id":"ls_studio_mon","text":"STUDIO MON","match_texts":["STUDIO MON"],"source_nodes":["ls_p03","ls_a09"],"source_scope":["story_body"],"effects":[{"type":"discover_keyword","keyword_id":"ls_studio_mon"}]},
+    {"keyword_id":"ls_talkback","text":"Talkback记录","match_texts":["Talkback Active","Talkback记录"],"source_nodes":["ls_p03"],"source_scope":["story_body"],"effects":[{"type":"discover_keyword","keyword_id":"ls_talkback"}]},
+    {"keyword_id":"ls_manmade","text":"人为干预","match_texts":["人为干预","并非自然形成"],"source_nodes":["ls_p04"],"source_scope":["story_body"],"effects":[{"type":"discover_keyword","keyword_id":"ls_manmade"}]},
+    {"keyword_id":"ls_device_knowledge","text":"设备知识","match_texts":["设备知识","具备一定录音设备知识"],"source_nodes":["ls_p04"],"source_scope":["story_body"],"effects":[{"type":"discover_keyword","keyword_id":"ls_device_knowledge"}]},
+    {"keyword_id":"ls_exposure","text":"陈默存在暴露风险","match_texts":["陈默存在暴露风险","暴露风险"],"source_nodes":["ls_a07"],"source_scope":["story_body"],"effects":[{"type":"discover_keyword","keyword_id":"ls_exposure"}]},
+    {"keyword_id":"ls_motive","text":"阻止宋言继续调查","match_texts":["阻止宋言继续调查的动机","阻止宋言继续调查"],"source_nodes":["ls_a07"],"source_scope":["story_body"],"effects":[{"type":"discover_keyword","keyword_id":"ls_motive"}]}
+  ],
+  "keyword_rules": [
+    {"keyword":"22:40宋言声音","source_nodes":["ls_0002"],"connections":[
+      {"target_node_id":"ls_fact_surface_alive","outcome":"correct","unlock_node_ids":["ls_fact_surface_alive"],"set_flags":{"surface_voice_interpreted_alive":true},"feedback":"表面时间线成立，但它仍建立在‘声音等于实时在场’的前提上。"}
+    ]},
+    {"keyword":"陈默一直在控制室","source_nodes":["ls_0002","ls_p02"],"connections":[
+      {"target_node_id":"ls_pollution_no_opportunity","outcome":"pollution","pollution_node_id":"ls_pollution_no_opportunity","requires_flags":{"surface_voice_interpreted_alive":true},"set_flags":{"pollution_no_opportunity_created":true},"feedback":"在当前前提下，陈默看似缺乏直接机会。这条推理暂时进入图谱。"}
+    ]},
+    {"keyword":"死亡早于22:40","source_nodes":["ls_p01"],"connections":[
+      {"target_node_id":"ls_fact_time_contradiction","outcome":"correct","unlock_node_ids":["ls_fact_time_contradiction"],"requires_flags":{"surface_voice_interpreted_alive":true},"set_flags":{"time_contradiction":true},"feedback":"死亡时间与22:40表面存活时间线冲突。"}
+    ]},
+    {"keyword":"21:38","source_nodes":["ls_a02"],"connections":[
+      {"target_node_id":"ls_fact_near_death_time","outcome":"correct","unlock_node_ids":["ls_fact_near_death_time"],"set_flags":{"near_death_time_2138":true},"feedback":"21:38可以作为接近真实死亡时间的候选点，但不是法医确认时间。"}
+    ]},
+    {"keyword":"重复声音片段","source_nodes":["ls_a03"],"connections":[
+      {"target_node_id":"ls_fact_audio_edited","outcome":"correct","unlock_node_ids":["ls_fact_audio_edited"],"set_flags":{"repeated_material_confirmed":true,"audio_edited":true},"feedback":"重复的人声与底噪边缘支持试麦文件存在异常编辑。"}
+    ]},
+    {"keyword":"背景滚轮声","source_nodes":["ls_a03"],"connections":[
+      {"target_node_id":"ls_fact_cart_recorded","outcome":"correct","unlock_node_ids":["ls_fact_cart_recorded"],"requires_flags":{"cleaning_cart_sound_important":true},"set_flags":{"cart_sound_recorded":true},"feedback":"录音中的背景声与清洁车特征声相符。"}
+    ]},
+    {"keyword":"主录音室隔音","source_nodes":["ls_0000","ls_a04"],"connections":[
+      {"target_node_id":"ls_fact_not_main_studio","outcome":"correct","unlock_node_ids":["ls_fact_not_main_studio"],"requires_flags":{"cart_sound_recorded":true},"set_flags":{"not_main_studio_recording":true},"feedback":"清晰清洁车声与双层隔音条件冲突，至少部分素材不在主录音室录制。"}
+    ]},
+    {"keyword":"Playback Start","source_nodes":["ls_p03"],"connections":[
+      {"target_node_id":"ls_fact_playback_existing","outcome":"correct","unlock_node_ids":["ls_fact_playback_existing"],"requires_flags":{"audio_edited":true},"set_flags":{"playback_existing_content":true},"feedback":"Playback记录与异常编辑共同支持22:40播放的是已有音频。"}
+    ]},
+    {"keyword":"STUDIO MON","source_nodes":["ls_p03","ls_a09"],"connections":[
+      {"target_node_id":"ls_fact_fake_survival","outcome":"correct","unlock_node_ids":["ls_fact_fake_survival"],"requires_flags":{"playback_existing_content":true},"set_flags":{"fake_survival_condition":true,"chen_testimony_invalid":true},"invalidate_pollution_node_id":"ls_pollution_no_opportunity","feedback":"回放可从控制室送入主录音室。22:40只能确认出现宋言的声音，原污染推理前提失效。"}
+    ]},
+    {"keyword":"人为干预","source_nodes":["ls_p04"],"connections":[
+      {"target_node_id":"ls_fact_major_suspicion","outcome":"correct","unlock_node_ids":["ls_fact_major_suspicion"],"requires_flags":{"chen_testimony_invalid":true,"fake_survival_condition":true,"scene_manmade":true,"chen_motive":true},"set_flags":{"major_suspicion_chen":true},"feedback":"证词不成立、假时间条件、人为现场与动机共同形成重大嫌疑。"}
+    ]}
+  ]
+}

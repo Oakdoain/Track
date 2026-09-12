@@ -9,8 +9,10 @@ const C_BG := Color("#F7F9FF")
 const C_BLUE := Color("#123FA4")
 const C_BLUE_SOFT := Color("#EEF3FF")
 const C_WHITE := Color("#FFFFFF")
+const C_MUTED := Color("#8A91A3")
 
 var _list: VBoxContainer
+var _buttons_by_contact_id: Dictionary = {}
 
 
 func _ready() -> void:
@@ -23,6 +25,7 @@ func set_contacts(contacts: Array[Dictionary]) -> void:
 	for child in _list.get_children():
 		_list.remove_child(child)
 		child.queue_free()
+	_buttons_by_contact_id.clear()
 	var seen: Dictionary = {}
 	for contact in contacts:
 		var contact_id := str(contact.get("id", ""))
@@ -32,13 +35,18 @@ func set_contacts(contacts: Array[Dictionary]) -> void:
 		seen[contact_id] = true
 		var button := Button.new()
 		button.name = "Contact_" + contact_id
-		button.text = display_name
+		var status_text := str(contact.get("status_text", ""))
+		button.text = display_name if status_text == "" else "%s（%s）" % [display_name, status_text]
 		button.icon = ICON_PHONE
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		button.custom_minimum_size = Vector2(0, 48)
 		button.add_theme_font_override("font", FONT_SERIF_REGULAR)
 		button.add_theme_font_size_override("font_size", 16)
 		button.add_theme_color_override("font_color", C_BLUE)
+		button.add_theme_color_override("font_hover_color", C_BLUE)
+		button.add_theme_color_override("font_pressed_color", C_BLUE)
+		button.add_theme_color_override("font_focus_color", C_BLUE)
+		button.add_theme_color_override("font_disabled_color", C_MUTED)
 		button.add_theme_color_override("icon_normal_color", C_BLUE)
 		button.add_theme_constant_override("icon_max_width", 18)
 		button.add_theme_stylebox_override("normal", _style(C_WHITE, C_BLUE, 1, 3))
@@ -47,6 +55,12 @@ func set_contacts(contacts: Array[Dictionary]) -> void:
 		button.add_theme_stylebox_override("focus", _style(C_BLUE_SOFT, C_BLUE, 2, 3))
 		button.pressed.connect(_emit_contact.bind(contact_id))
 		_list.add_child(button)
+		_buttons_by_contact_id[contact_id] = button
+
+
+func get_contact_control(contact_id: String) -> Control:
+	var value: Variant = _buttons_by_contact_id.get(contact_id)
+	return value as Control if value is Control and is_instance_valid(value) else null
 
 
 func _build() -> void:

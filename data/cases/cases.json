@@ -5,9 +5,9 @@
 			"slice_id": "archive_training",
 			"order": 0,
 			"code": "T-00",
-			"title": "教学档案：被重新封存的卷宗",
-			"short_title": "被重新封存的卷宗",
-			"subtitle": "ARCHIVE TRAINING FILE",
+			"title": "归档异常",
+			"short_title": "归档异常",
+			"subtitle": "ARCHIVE ANOMALY",
 			"case_type": "tutorial",
 			"estimated_time": "8—12 分钟",
 			"data_path": "res://data/cases/tutorial_00/archive_training",
@@ -26,6 +26,20 @@
 			"estimated_time": "开发中",
 			"data_path": "res://data/cases/case_01/control_backup",
 			"completion_flag": "",
+			"recommended": false
+		},
+		{
+			"case_id": "case_02",
+			"slice_id": "last_soundcheck",
+			"order": 2,
+			"code": "DEMO 02",
+			"title": "最后一次试麦",
+			"short_title": "最后一次试麦",
+			"subtitle": "THE LAST SOUNDCHECK",
+			"case_type": "case",
+			"estimated_time": "45—60 分钟",
+			"data_path": "res://data/cases/case_02/last_soundcheck",
+			"completion_flag": "last_soundcheck_completed",
 			"recommended": false
 		}
 	]

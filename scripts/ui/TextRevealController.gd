@@ -29,12 +29,13 @@ func start(
 	_post_delay = maxf(0.0, float(config.get("post_delay", DEFAULT_POST_DELAY)))
 	var can_restore := (
 		str(restored_state.get("node_id", "")) == node_id
+		and str(restored_state.get("reveal_section_id", "")) == str(config.get("reveal_section_id", ""))
 		and not bool(restored_state.get("events_completed", false))
 	)
 	if can_restore:
 		_state = restored_state.duplicate(true)
 		_state["section_index"] = clampi(int(_state.get("section_index", 0)), 0, _sections.size())
-		_state["visible_characters"] = maxi(0, int(_state.get("visible_characters", 0)))
+		_state["visible_characters"] = maxi(_section_initial_visible(int(_state["section_index"])), int(_state.get("visible_characters", 0)))
 		_state["character_elapsed"] = maxf(0.0, float(_state.get("character_elapsed", 0.0)))
 		_state["post_reveal_elapsed"] = maxf(0.0, float(_state.get("post_reveal_elapsed", 0.0)))
 		_state["post_delay_total"] = maxf(0.0, float(_state.get("post_delay_total", _post_delay)))
@@ -43,8 +44,9 @@ func start(
 	else:
 		_state = {
 			"node_id": node_id,
+			"reveal_section_id": str(config.get("reveal_section_id", "")),
 			"section_index": 0,
-			"visible_characters": 0,
+			"visible_characters": _section_initial_visible(0),
 			"character_elapsed": 0.0,
 			"completed": not animate_text,
 			"waiting_after_reveal": not animate_text and has_post_events,
@@ -124,7 +126,7 @@ func _advance_text(delta: float) -> void:
 		if visible >= text.length():
 			_set_section_visible(section_index, -1)
 			_state["section_index"] = section_index + 1
-			_state["visible_characters"] = 0
+			_state["visible_characters"] = _section_initial_visible(section_index + 1)
 			_state["character_elapsed"] = 0.0
 			changed = true
 			continue
@@ -173,7 +175,7 @@ func _apply_visibility() -> void:
 		elif index == section_index:
 			_set_section_visible(index, current_visible)
 		else:
-			_set_section_visible(index, 0)
+			_set_section_visible(index, _section_initial_visible(index))
 
 
 func _show_all_sections() -> void:
@@ -187,6 +189,12 @@ func _set_section_visible(index: int, count: int) -> void:
 	var control: Control = _sections[index].get("control") as Control
 	if is_instance_valid(control):
 		control.set("visible_characters", count)
+
+
+func _section_initial_visible(index: int) -> int:
+	if index < 0 or index >= _sections.size():
+		return 0
+	return maxi(0, int(_sections[index].get("initial_visible_characters", 0)))
 
 
 func _punctuation_pause(character: String) -> float:

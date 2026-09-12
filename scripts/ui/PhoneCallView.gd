@@ -46,10 +46,12 @@ var _reject_icon: TextureRect
 var _accept_icon: TextureRect
 var _active_call_view: Control
 var _active_contact_name: Label
+var _active_status_label: Label
 var _scroll: ScrollContainer
 var _message_list: VBoxContainer
 var _message_views: Array[PhoneMessageView] = []
 var _transcribing_label: Label
+var _call_ended_status: Label
 var _reply_area: Control
 var _reply_prompt: Label
 var _choice_list: VBoxContainer
@@ -92,15 +94,21 @@ func render_call(active_call: Dictionary, contact: Dictionary) -> void:
 	var contact_name := str(contact.get("display_name", ""))
 	var status := str(active_call.get("status", ""))
 	var incoming := status == "incoming_waiting"
-	_incoming_call_view.visible = incoming
-	_active_call_view.visible = not incoming
+	var outgoing_waiting := status == "outgoing_waiting"
+	var waiting := incoming or outgoing_waiting
+	var ending := status == "ending"
+	_incoming_call_view.visible = waiting
+	_active_call_view.visible = not waiting
 	_incoming_contact_name.text = contact_name
 	_active_contact_name.text = contact_name
-	if incoming:
+	_active_status_label.text = str(active_call.get("view_subtitle", "语音转写"))
+	if waiting:
 		_start_calling_animation()
-		_render_incoming_state()
+		_render_waiting_state(incoming)
 		return
 	_stop_calling_animation()
+	_call_ended_status.visible = ending
+	_reply_area.visible = not ending
 	_suspend_scroll_requests = true
 	var structural_change := false
 	var reveal_changed := false
@@ -156,6 +164,10 @@ func clear_call() -> void:
 		_incoming_status.text = ""
 		_incoming_call_view.visible = false
 		_active_call_view.visible = false
+		if _call_ended_status != null:
+			_call_ended_status.visible = false
+		if _reply_area != null:
+			_reply_area.visible = true
 	_suspend_scroll_requests = false
 	if _scroll != null:
 		_scroll.scroll_vertical = 0
@@ -266,9 +278,9 @@ func _build_active_view() -> void:
 	_active_contact_name = _label("", 20, C_BLUE, FONT_SERIF_SEMIBOLD)
 	_active_contact_name.name = "ContactName"
 	header.add_child(_active_contact_name)
-	var transcript_status := _label("语音转写", 14, C_SUBTEXT, FONT_SERIF_REGULAR)
-	transcript_status.name = "TranscriptStatus"
-	header.add_child(transcript_status)
+	_active_status_label = _label("语音转写", 14, C_SUBTEXT, FONT_SERIF_REGULAR)
+	_active_status_label.name = "TranscriptStatus"
+	header.add_child(_active_status_label)
 	var header_separator := HSeparator.new()
 	header_separator.name = "TopSeparator"
 	header_separator.add_theme_stylebox_override("separator", _style(C_LINE, C_LINE, 1, 0))
@@ -287,6 +299,17 @@ func _build_active_view() -> void:
 	transcript_margin.add_theme_constant_override("margin_top", 0)
 	transcript_margin.add_theme_constant_override("margin_bottom", 0)
 	transcript_clip_root.add_child(transcript_margin)
+	var ended_center := CenterContainer.new()
+	ended_center.name = "CallEndedStatusCenter"
+	ended_center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	ended_center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ended_center.z_index = 20
+	transcript_clip_root.add_child(ended_center)
+	_call_ended_status = _label("通话已结束", 16, C_SUBTEXT, FONT_SERIF_REGULAR)
+	_call_ended_status.name = "CallEndedStatus"
+	_call_ended_status.visible = false
+	_call_ended_status.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ended_center.add_child(_call_ended_status)
 	_scroll = ScrollContainer.new()
 	_scroll.name = "TranscriptScroll"
 	_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -347,12 +370,15 @@ func _build_reply_area(parent: VBoxContainer) -> void:
 	choice_scroll.add_child(_choice_list)
 
 
-func _render_incoming_state() -> void:
+func _render_waiting_state(incoming: bool) -> void:
 	_clear_children(_choice_list)
-	_choice_signature = "incoming_waiting"
+	_choice_signature = "incoming_waiting" if incoming else "outgoing_waiting"
 	_choice_input_locked = false
 	_reject_button.disabled = false
-	_accept_button.disabled = false
+	_accept_button.disabled = not incoming
+	_reject_button.tooltip_text = "拒绝来电" if incoming else "挂断电话"
+	if _accept_button.get_parent() != null:
+		(_accept_button.get_parent() as Control).visible = incoming
 	_refresh_phone_icon_color(_reject_button, _reject_icon, C_WARNING)
 	_refresh_phone_icon_color(_accept_button, _accept_icon, C_BLUE)
 

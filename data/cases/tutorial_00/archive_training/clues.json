@@ -1,32 +1,18 @@
 {
-	"clues": [
-		{
-			"id": "clue_tutorial_seal_record",
-			"title": "封存登记",
-			"type": "文本线索",
-			"source_node": "tutorial_0005",
-			"summary": "登记显示封存时共有三页材料，且封口完整。"
-		},
-		{
-			"id": "clue_tutorial_seal_mark",
-			"title": "封口白痕",
-			"type": "关键词线索",
-			"source_node": "tutorial_0007s",
-			"summary": "拆封前记录在档案袋粘合边缘的细窄白痕，可能由胶层受拉扯或二次粘合形成。"
-		},
-		{
-			"id": "clue_tutorial_archive_id",
-			"title": "T-00编号",
-			"type": "关键词线索",
-			"source_node": "tutorial_0007",
-			"summary": "训练档案的识别编号，本身不能证明文件数量发生变化。"
-		},
-		{
-			"id": "clue_tutorial_page_gap",
-			"title": "页码缺口",
-			"type": "关键词线索",
-			"source_node": "tutorial_0006",
-			"summary": "现存第一页和第三页之间缺少第二页，与封存登记的连续编号不一致。"
-		}
-	]
+  "clues": [
+    {
+      "id": "clue_tutorial_thread_fade",
+      "title": "线头褪色",
+      "type": "关键词线索",
+      "source_node": "tutorial_0012",
+      "summary": "线头末端只有很短的一截褪色，棉线整体老化程度与档案袋本体不一致。"
+    },
+    {
+      "id": "clue_tutorial_witness_statement_missing",
+      "title": "证人陈述记录缺失",
+      "type": "关键词线索",
+      "source_node": "tutorial_0015",
+      "summary": "归档清单登记了一份证人陈述记录，但该材料目前不在 TH-0731 档案袋内。"
+    }
+  ]
 }

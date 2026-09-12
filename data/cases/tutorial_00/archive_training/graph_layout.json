@@ -1,29 +1,21 @@
 {
-	"canvas_size": [1900, 2000],
-	"nodes": {
-		"tutorial_0000": [820, 40],
-		"tutorial_0001": [820, 210],
-		"tutorial_0012": [820, 390],
-		"tutorial_0012_a": [820, 390],
-		"tutorial_0013": [520, 570],
-		"tutorial_0002a": [300, 390],
-		"tutorial_0002b": [820, 390],
-		"tutorial_0002c": [1340, 390],
-		"tutorial_0002d": [1600, 570],
-		"tutorial_0003": [820, 570],
-		"tutorial_0004": [820, 750],
-		"tutorial_0005": [820, 930],
-		"tutorial_0006": [500, 1110],
-		"tutorial_inference_seal": [1080, 1110],
-		"tutorial_0007": [500, 1290],
-		"tutorial_0007s": [160, 1470],
-		"tutorial_inference_file_change": [990, 1290],
-		"tutorial_hypothesis_admin": [1450, 1290],
-		"tutorial_0008e": [1450, 1470],
-		"tutorial_inference_final": [990, 1640],
-		"tutorial_0009": [500, 1640],
-		"tutorial_0009a": [330, 1640],
-		"tutorial_0009b": [850, 1640],
-		"tutorial_0010": [500, 1810]
-	}
+  "canvas_size": [1900, 2200],
+  "nodes": {
+    "tutorial_0000": [820, 40],
+    "tutorial_0001": [820, 210],
+    "tutorial_0011": [1100, 390],
+    "tutorial_0012": [540, 390],
+    "tutorial_fact_thread_age_mismatch": [260, 620],
+    "tutorial_hypothesis_archive_date": [760, 620],
+    "tutorial_hypothesis_malicious_damage": [1260, 620],
+    "tutorial_fact_seal_anomaly": [260, 850],
+    "tutorial_0014": [760, 850],
+    "tutorial_0015": [760, 1080],
+    "tutorial_fact_material_mismatch": [1260, 1310],
+    "tutorial_conclusion_supported": [260, 1580],
+    "tutorial_conclusion_causal": [760, 1580],
+    "tutorial_conclusion_erin": [1260, 1580],
+    "tutorial_0016": [760, 1840],
+    "tutorial_0017": [760, 2070]
+  }
 }

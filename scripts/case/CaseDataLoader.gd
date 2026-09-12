@@ -9,6 +9,7 @@ const CASE_DATA_ROOT := "res://data/cases/"
 
 var data: Dictionary = {}
 var nodes_by_id: Dictionary = {}
+var node_aliases: Dictionary = {}
 var graph_layout: Dictionary = {}
 var keyword_rules: Array[Dictionary] = []
 var keyword_presets: Dictionary = {}
@@ -18,6 +19,9 @@ var current_case_descriptor: Dictionary = {}
 var case_metadata: Dictionary = {}
 var clues_data: Dictionary = {}
 var audio_clues_data: Dictionary = {}
+var case_capabilities: Dictionary = {}
+var actions_by_id: Dictionary = {}
+var timed_events: Array[Dictionary] = []
 
 
 func load_registry(path: String = REGISTRY_PATH) -> bool:
@@ -126,6 +130,30 @@ func load_case(case_id: String, slice_id: String) -> bool:
 		_clear_loaded_case()
 		return false
 
+	var capabilities_value: Variant = metadata_candidate.get("capabilities", {})
+	var capabilities_candidate: Dictionary = (capabilities_value as Dictionary).duplicate(true) if capabilities_value is Dictionary else {}
+	var actions_candidate: Dictionary = {}
+	var events_candidate: Array[Dictionary] = []
+	if bool(capabilities_candidate.get("investigation_time", false)):
+		var action_document := _read_json_dictionary(data_path + "/actions.json", "investigation actions")
+		var event_document := _read_json_dictionary(data_path + "/timed_events.json", "timed events")
+		if action_document.is_empty() or event_document.is_empty():
+			_clear_loaded_case()
+			return false
+		var action_validation := _validate_optional_actions(action_document, candidate)
+		if not bool(action_validation.get("success", false)):
+			push_error("CaseDataLoader: " + str(action_validation.get("error", "invalid action data")))
+			_clear_loaded_case()
+			return false
+		actions_candidate = (action_validation.get("actions", {}) as Dictionary).duplicate(true)
+		var event_validation := _validate_optional_timed_events(event_document, candidate)
+		if not bool(event_validation.get("success", false)):
+			push_error("CaseDataLoader: " + str(event_validation.get("error", "invalid timed event data")))
+			_clear_loaded_case()
+			return false
+		for event_value in (event_validation.get("events", []) as Array):
+			events_candidate.append((event_value as Dictionary).duplicate(true))
+
 	var start_node_id: String = str(metadata_candidate.get("start_node_id", ""))
 
 	if candidate.get_node(start_node_id).is_empty():
@@ -136,6 +164,7 @@ func load_case(case_id: String, slice_id: String) -> bool:
 	# Commit only after every required file has parsed and cross-validation passed.
 	data = candidate.data.duplicate(true)
 	nodes_by_id = candidate.nodes_by_id.duplicate(true)
+	node_aliases = candidate.node_aliases.duplicate(true)
 	graph_layout = candidate.graph_layout.duplicate(true)
 	keyword_rules = candidate.keyword_rules.duplicate(true)
 	keyword_presets = candidate.keyword_presets.duplicate(true)
@@ -144,6 +173,9 @@ func load_case(case_id: String, slice_id: String) -> bool:
 	current_case_descriptor = descriptor.duplicate(true)
 	clues_data = clues_candidate.duplicate(true)
 	audio_clues_data = audio_candidate.duplicate(true)
+	case_capabilities = capabilities_candidate
+	actions_by_id = actions_candidate
+	timed_events = events_candidate
 	return true
 
 
@@ -193,7 +225,9 @@ func get_keyword_effect(keyword_id: String) -> Dictionary:
 func find_keyword_effect(keyword: String, source_scope: String) -> Dictionary:
 	var normalized := _normalize_keyword(keyword)
 	for effect_rule in keyword_effects:
-		if str(effect_rule.get("normalized_keyword", "")) != normalized:
+		var matches_value: Variant = effect_rule.get("normalized_match_texts", [])
+		var matches: Array = matches_value if matches_value is Array else []
+		if not matches.has(normalized):
 			continue
 		var scopes: Variant = effect_rule.get("source_scope", [])
 		if scopes is Array and (scopes as Array).has(source_scope):
@@ -218,9 +252,38 @@ func get_audio_data_path() -> String:
 	return data_path + "/audio_clues.json" if data_path != "" else ""
 
 
+func has_capability(capability_id: String) -> bool:
+	return bool(case_capabilities.get(capability_id, false))
+
+
+func get_case_capabilities() -> Dictionary:
+	return case_capabilities.duplicate(true)
+
+
+func get_action(action_id: String) -> Dictionary:
+	var value: Variant = actions_by_id.get(action_id, {})
+	return (value as Dictionary).duplicate(true) if value is Dictionary else {}
+
+
+func get_actions() -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	for value in actions_by_id.values():
+		result.append((value as Dictionary).duplicate(true))
+	result.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return str(a.get("action_id", "")) < str(b.get("action_id", "")))
+	return result
+
+
+func get_timed_events() -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	for value in timed_events:
+		result.append(value.duplicate(true))
+	return result
+
+
 func load_nodes(path: String = DEFAULT_NODES_PATH) -> bool:
 	data.clear()
 	nodes_by_id.clear()
+	node_aliases.clear()
 
 	if not FileAccess.file_exists(path):
 		push_error("CaseDataLoader: nodes file not found: " + path)
@@ -244,6 +307,13 @@ func load_nodes(path: String = DEFAULT_NODES_PATH) -> bool:
 		return false
 
 	data = parsed
+	var aliases_value: Variant = data.get("node_aliases", {})
+	if aliases_value is Dictionary:
+		for old_id_value in (aliases_value as Dictionary).keys():
+			var old_id := str(old_id_value)
+			var new_id := str((aliases_value as Dictionary)[old_id_value])
+			if old_id != "" and new_id != "":
+				node_aliases[old_id] = new_id
 
 	var raw_nodes: Variant = data.get("nodes", [])
 
@@ -264,15 +334,25 @@ func load_nodes(path: String = DEFAULT_NODES_PATH) -> bool:
 
 
 func get_node(node_id: String) -> Dictionary:
-	if not nodes_by_id.has(node_id):
+	var resolved_id := resolve_node_id(node_id)
+	if not nodes_by_id.has(resolved_id):
 		return {}
 
-	var node: Variant = nodes_by_id[node_id]
+	var node: Variant = nodes_by_id[resolved_id]
 
 	if node is Dictionary:
 		return node
 
 	return {}
+
+
+func resolve_node_id(node_id: String) -> String:
+	var resolved := node_id
+	var visited: Dictionary = {}
+	while node_aliases.has(resolved) and not visited.has(resolved):
+		visited[resolved] = true
+		resolved = str(node_aliases[resolved])
+	return resolved
 
 
 func get_logical_node_id(node_id: String) -> String:
@@ -443,6 +523,8 @@ func _parse_keyword_effects(raw_effects: Variant) -> void:
 		var rule: Dictionary = raw_rule
 		var keyword_id := str(rule.get("keyword_id", ""))
 		var keyword := str(rule.get("text", rule.get("keyword", "")))
+		var match_texts_value: Variant = rule.get("match_texts", [keyword])
+		var source_nodes_value: Variant = rule.get("source_nodes", [])
 		var scopes_value: Variant = rule.get("source_scope", [])
 		var effects_value: Variant = rule.get("effects", [])
 		if keyword_id == "" or keyword == "" or seen_ids.has(keyword_id):
@@ -459,12 +541,27 @@ func _parse_keyword_effects(raw_effects: Variant) -> void:
 				break
 			scopes.append(str(scope_value))
 		var normalized_effects: Array[Dictionary] = []
+		var source_nodes: Array[String] = []
+		if source_nodes_value is Array:
+			for source_node_value in (source_nodes_value as Array):
+				var source_node_id := str(source_node_value)
+				if source_node_id != "" and not source_nodes.has(source_node_id):
+					source_nodes.append(source_node_id)
+		var normalized_match_texts: Array[String] = []
+		if match_texts_value is Array:
+			for match_text_value in (match_texts_value as Array):
+				var normalized_match := _normalize_keyword(str(match_text_value))
+				if normalized_match != "" and not normalized_match_texts.has(normalized_match):
+					normalized_match_texts.append(normalized_match)
+		var canonical_normalized := _normalize_keyword(keyword)
+		if canonical_normalized != "" and not normalized_match_texts.has(canonical_normalized):
+			normalized_match_texts.append(canonical_normalized)
 		for effect_value in (effects_value as Array):
 			if not (effect_value is Dictionary) or str((effect_value as Dictionary).get("type", "")) == "":
 				valid = false
 				break
 			normalized_effects.append((effect_value as Dictionary).duplicate(true))
-		if not valid:
+		if not valid or normalized_match_texts.is_empty():
 			push_warning("CaseDataLoader: ignored invalid keyword effect: " + keyword_id)
 			continue
 		seen_ids[keyword_id] = true
@@ -472,7 +569,9 @@ func _parse_keyword_effects(raw_effects: Variant) -> void:
 			"keyword_id": keyword_id,
 			"keyword": keyword,
 			"normalized_keyword": _normalize_keyword(keyword),
+			"normalized_match_texts": normalized_match_texts,
 			"source_scope": scopes,
+			"source_nodes": source_nodes,
 			"effects": normalized_effects
 		})
 
@@ -607,7 +706,10 @@ func _append_normalized_keyword_rule(base_rule: Dictionary, connection: Dictiona
 			"unlock_node_id": str(connection.get("unlock_node_id", "")),
 			"unlock_node_ids": unlock_node_ids.duplicate(),
 			"error_node_id": str(connection.get("error_node_id", "")),
+			"pollution_node_id": str(connection.get("pollution_node_id", "")),
+			"invalidate_pollution_node_id": str(connection.get("invalidate_pollution_node_id", "")),
 			"feedback": str(connection.get("feedback", "")),
+			"next_node_id": str(connection.get("next_node_id", "")),
 			"set_flags": set_flags.duplicate(true),
 			"requires_flags": requires_flags.duplicate(true),
 			"autosave_on_success": bool(connection.get("autosave_on_success", false)),
@@ -695,7 +797,8 @@ func _parse_keyword_presets(raw_presets: Variant) -> void:
 
 			if normalized_candidate.length() > CaseRuntimeState.MAX_KEYWORD_LENGTH:
 				push_warning(
-					"CaseDataLoader: ignored keyword preset over 10 characters for %s: %s" % [
+					"CaseDataLoader: ignored keyword preset over %d characters for %s: %s" % [
+						CaseRuntimeState.MAX_KEYWORD_LENGTH,
 						node_id,
 						normalized_candidate
 					]
@@ -730,6 +833,58 @@ func _normalize_keyword(text: String) -> String:
 		return normalized_text
 
 	return whitespace_regex.sub(normalized_text, " ", true)
+
+
+func _validate_optional_actions(document: Dictionary, case_loader: CaseDataLoader) -> Dictionary:
+	var values: Variant = document.get("actions", [])
+	if not (values is Array):
+		return {"success": false, "error": "actions.json requires an actions Array"}
+	var result: Dictionary = {}
+	for value in (values as Array):
+		if not (value is Dictionary):
+			return {"success": false, "error": "action entry must be a Dictionary"}
+		var action: Dictionary = (value as Dictionary).duplicate(true)
+		var action_id := str(action.get("action_id", ""))
+		var executor := str(action.get("executor", ""))
+		var duration_value: Variant = action.get("duration", 0)
+		if action_id == "" or result.has(action_id) or executor not in ["assistant", "police"]:
+			return {"success": false, "error": "invalid or duplicate action: " + action_id}
+		if not (duration_value is int or duration_value is float) or int(duration_value) <= 0:
+			return {"success": false, "error": "action duration must be positive: " + action_id}
+		for result_node_value in action.get("result_nodes", []):
+			var result_node_id := str(result_node_value)
+			if result_node_id == "" or case_loader.get_node(result_node_id).is_empty():
+				return {"success": false, "error": "action result node is missing: %s -> %s" % [action_id, result_node_id]}
+		action["duration"] = int(duration_value)
+		result[action_id] = action
+	return {"success": true, "actions": result}
+
+
+func _validate_optional_timed_events(document: Dictionary, case_loader: CaseDataLoader) -> Dictionary:
+	var values: Variant = document.get("events", [])
+	if not (values is Array):
+		return {"success": false, "error": "timed_events.json requires an events Array"}
+	var result: Array[Dictionary] = []
+	var seen: Dictionary = {}
+	for value in (values as Array):
+		if not (value is Dictionary):
+			return {"success": false, "error": "timed event entry must be a Dictionary"}
+		var event: Dictionary = (value as Dictionary).duplicate(true)
+		var event_id := str(event.get("event_id", ""))
+		var trigger_value: Variant = event.get("trigger_time", 0)
+		if event_id == "" or seen.has(event_id) or not (trigger_value is int or trigger_value is float):
+			return {"success": false, "error": "invalid or duplicate timed event: " + event_id}
+		for outcome_value in event.get("outcomes", []):
+			if not (outcome_value is Dictionary):
+				return {"success": false, "error": "timed event outcome must be a Dictionary: " + event_id}
+			var target_id := str((outcome_value as Dictionary).get("transition_node_id", ""))
+			if target_id != "" and case_loader.get_node(target_id).is_empty():
+				return {"success": false, "error": "timed event target is missing: %s -> %s" % [event_id, target_id]}
+		event["trigger_time"] = int(trigger_value)
+		seen[event_id] = true
+		result.append(event)
+	result.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return int(a.get("trigger_time", 0)) < int(b.get("trigger_time", 0)))
+	return {"success": true, "events": result}
 
 
 func _read_json_dictionary(path: String, label: String) -> Dictionary:
@@ -801,6 +956,7 @@ func _sort_case_descriptors(left: Dictionary, right: Dictionary) -> bool:
 func _clear_loaded_case() -> void:
 	data.clear()
 	nodes_by_id.clear()
+	node_aliases.clear()
 	graph_layout.clear()
 	keyword_rules.clear()
 	keyword_presets.clear()
@@ -809,3 +965,6 @@ func _clear_loaded_case() -> void:
 	case_metadata.clear()
 	clues_data.clear()
 	audio_clues_data.clear()
+	case_capabilities.clear()
+	actions_by_id.clear()
+	timed_events.clear()

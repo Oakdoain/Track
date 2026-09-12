@@ -24,23 +24,26 @@ func configure(zoom: float, scroll_offset: Vector2) -> void:
 
 
 func _draw() -> void:
-	draw_rect(Rect2(Vector2.ZERO, size), BACKGROUND_COLOR)
+	var local_rect := Rect2(Vector2.ZERO, size)
+	if local_rect.size.x <= 0.0 or local_rect.size.y <= 0.0:
+		return
+	draw_rect(local_rect, BACKGROUND_COLOR)
 	var spacing := BASE_GRID_SPACING * _zoom
-	_draw_axis_grid(true, spacing, _scroll_offset.x)
-	_draw_axis_grid(false, spacing, _scroll_offset.y)
+	_draw_axis_grid(true, spacing, _scroll_offset.x, local_rect)
+	_draw_axis_grid(false, spacing, _scroll_offset.y, local_rect)
 
 
-func _draw_axis_grid(vertical: bool, spacing: float, scroll_value: float) -> void:
+func _draw_axis_grid(vertical: bool, spacing: float, scroll_value: float, local_rect: Rect2) -> void:
 	var first_index := floori(scroll_value / spacing)
 	var coordinate := float(first_index) * spacing - scroll_value
 	var index := first_index
-	var limit := size.x if vertical else size.y
+	var limit := local_rect.size.x if vertical else local_rect.size.y
 	while coordinate <= limit:
 		var snapped_coordinate := floorf(coordinate) + 0.5
 		var color := MAJOR_GRID_COLOR if posmod(index, MAJOR_GRID_INTERVAL) == 0 else MINOR_GRID_COLOR
 		if vertical:
-			draw_line(Vector2(snapped_coordinate, 0.0), Vector2(snapped_coordinate, size.y), color, 1.0, false)
+			draw_line(Vector2(snapped_coordinate, 0.0), Vector2(snapped_coordinate, local_rect.size.y), color, 1.0, false)
 		else:
-			draw_line(Vector2(0.0, snapped_coordinate), Vector2(size.x, snapped_coordinate), color, 1.0, false)
+			draw_line(Vector2(0.0, snapped_coordinate), Vector2(local_rect.size.x, snapped_coordinate), color, 1.0, false)
 		coordinate += spacing
 		index += 1

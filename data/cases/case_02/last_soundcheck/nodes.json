@@ -1,0 +1,79 @@
+{
+  "case_id":"case_02_last_soundcheck",
+  "chapter_title":"最后一次试麦",
+  "chapter_intro":"录音室命案调查。以文字记录、试麦音频、行动调度和关系图谱重建22:40之前发生的事。",
+  "current_goal":"阅读初始材料并安排调查。",
+  "discovered_keywords":[],
+  "initial_node_id":"ls_0000",
+  "characters":{
+    "victim_song_yan":{"display_name":"宋言","role":"死者"},
+    "suspect_chen_mo":{"display_name":"陈默","role":"录音师"},
+    "singer_lin_wei":{"display_name":"林薇","role":"签约歌手"},
+    "manager_zhao_yiming":{"display_name":"赵一鸣","role":"经纪人"},
+    "witness_wang_aunt":{"display_name":"王姨","role":"清洁人员"}
+  },
+  "nodes":[
+    {
+      "node_id":"ls_0000","title":"19:00 接案","icon_key":"start","node_type":"剧情节点","location":"调查终端","time_label":"19:00","characters":["player"],
+      "body":[
+        "宋言被发现死在主录音室内。现场没有可用监控画面，现阶段只能依靠文字记录、电话和电子操作日志复核经过。",
+        "陈默称自己整晚都在控制室。22:40，他从监听系统中听见宋言完成了一段试麦；赵一鸣则称自己21:25以后一直在外接电话。",
+        "现场勘验记录：主录音室采用双层隔音门；控制室可以通过STUDIO MON向棚内监听送出声音。设备停机状态与普通事故并不完全一致。",
+        "人物：死者宋言；录音师陈默；歌手林薇；经纪人赵一鸣；清洁人员王姨。"
+      ],
+      "audio_clues":[],"text_clues":["clue_surface_voice"],"room_refs":[],
+      "choices":[{"id":"open_dispatch","title":"建立调查调度","desc":"整理初始材料并安排助手与警察并行调查。","to":"ls_0001"}],"autosave":true
+    },
+    {
+      "node_id":"ls_0001","title":"调查调度","icon_key":"investigation","node_type":"行动节点","location":"调查终端","time_label":"动态","characters":["player","assistant","police_contact"],
+      "body":["阅读和图谱操作不消耗调查时间。派遣助手或警察会创建独立任务；两人可以并行，但同一角色在忙碌时不能接收第二项任务。","选择“推进调查时间”后，时间只前进到最近的任务完成或定时事件。"],
+      "audio_clues":[],"text_clues":[],"room_refs":[],
+      "choices":[
+        {"id":"open_contacts","title":"打开电话簿分配调查任务","action":"open_phonebook"},
+        {"id":"advance","title":"推进调查时间","action":"advance_investigation_time"},
+        {"id":"review_initial","title":"复核初始材料","to":"ls_0002"}
+      ],"autosave":true
+    },
+    {
+      "node_id":"ls_0002","title":"表面时间线","icon_key":"document","node_type":"文本线索节点","location":"调查终端","time_label":"记录时间 22:40","characters":["suspect_chen_mo","manager_zhao_yiming"],
+      "body":["陈默：22:40，监听里出现了宋言的声音。她念完试麦词以后，我通过Talkback让她等五分钟。","陈默：我一直在控制室，没有进入主录音室。","赵一鸣只能确认自己在走廊短暂停留过，无法确认22:40主录音室里是否真的有人。"],
+      "audio_clues":[],"text_clues":["clue_surface_voice"],"room_refs":[],
+      "graph_targets":["ls_fact_surface_alive","ls_pollution_no_opportunity"],
+      "choices":[{"title":"返回调查调度","to":"ls_0001"}],"autosave":true
+    },
+    {"node_id":"ls_a01","title":"初步证词整理","icon_key":"document","node_type":"行动结果","location":"助手回传","time_label":"动态","characters":["assistant"],"body":["助手将三份初步证词按时间排列。陈默的叙述把22:40的声音等同于宋言当时正在主录音室试麦，但没有第二名证人直接看到她。","赵一鸣承认与宋言有工作争执；林薇称21:10离开录音楼层。"],"audio_clues":[],"text_clues":[],"room_refs":[],"set_flags":{"initial_testimony_sorted":true},"choices":[{"title":"返回调查调度","to":"ls_0001"}],"autosave":true},
+    {"node_id":"ls_a02","title":"王姨的回忆","icon_key":"phone","node_type":"行动结果","location":"助手通话记录","time_label":"动态","characters":["assistant","witness_wang_aunt"],"body":["王姨记得21:38推车经过主录音室外。她听见一次异常嗡声，像大功率设备突然启动，又很快停止。","她没有进入录音室，也没有看见宋言。21:38只能作为接近真实死亡时间的线索，不能替代尸检结论。"],"audio_clues":[],"text_clues":["clue_wang_time"],"room_refs":[],"set_flags":{"contacted_wang_aunt":true},"graph_targets":["ls_fact_near_death_time"],"choices":[{"title":"返回调查调度","to":"ls_0001"}],"autosave":true},
+    {"node_id":"ls_a03","title":"22:40试麦音频","icon_key":"audio","node_type":"音频线索节点","location":"助手回传","time_label":"动态","characters":["assistant","victim_song_yan"],"body":["助手整理出一段七十二秒试麦文件。音频中能够听见宋言的声音，但文件本身不等同于实时录音。","18.4秒附近出现背景滚轮声；43.8秒附近的人声、呼吸间隔和底噪边缘与前段重复。"],"audio_clues":["audio_soundcheck_2240"],"text_clues":["clue_audio_repeat"],"room_refs":[],"set_flags":{"audio_soundcheck_available":true},"graph_targets":["ls_fact_audio_edited"],"choices":[{"title":"播放试麦音频","action":"play_audio"},{"title":"返回调查调度","to":"ls_0001"}],"autosave":true},
+    {"node_id":"ls_a04","title":"清洁车特征声","icon_key":"audio","node_type":"行动结果","location":"助手回传","time_label":"动态","characters":["assistant","witness_wang_aunt"],"body":["王姨使用的清洁车有一只旧滚轮，会以固定节奏发出摩擦声。比对后，它与试麦录音里的背景滚轮声具有相同节奏。","主录音室采用双层隔音门。正常情况下，走廊清洁车声不应以录音中的清晰度进入主麦克风。"],"audio_clues":["audio_soundcheck_2240"],"text_clues":["clue_audio_repeat"],"room_refs":[],"set_flags":{"cleaning_cart_sound_important":true},"graph_targets":["ls_fact_cart_recorded","ls_fact_not_main_studio"],"choices":[{"title":"返回调查调度","to":"ls_0001"}],"autosave":true},
+    {"node_id":"ls_a05","title":"赵一鸣调查结果","icon_key":"document","node_type":"行动结果","location":"助手回传","time_label":"动态","characters":["assistant","manager_zhao_yiming"],"body":["赵一鸣在案发时段与唱片公司持续沟通。他和宋言有合同争执，但公开行程与多个外部联系人可以交叉核对。","这条路线需要官方通话记录才能进一步排除或确认。"],"audio_clues":[],"text_clues":[],"room_refs":[],"set_flags":{"zhao_background_checked":true},"choices":[{"title":"返回调查调度","to":"ls_0001"}],"autosave":true},
+    {"node_id":"ls_a06","title":"林薇调查结果","icon_key":"document","node_type":"行动结果","location":"助手回传","time_label":"动态","characters":["assistant","singer_lin_wei"],"body":["林薇与宋言存在创作分歧，但当晚离开楼层后参加了公开直播彩排。她知道控制室能够向棚内监听回放声音，却不掌握工程权限。"],"audio_clues":[],"text_clues":[],"room_refs":[],"set_flags":{"lin_background_checked":true},"choices":[{"title":"返回调查调度","to":"ls_0001"}],"autosave":true},
+    {"node_id":"ls_a07","title":"工程权限与暴露风险","icon_key":"document","node_type":"行动结果","location":"助手回传","time_label":"动态","characters":["assistant","suspect_chen_mo","victim_song_yan"],"body":["工程文件曾被未经授权复制。宋言已经开始检查访问权限，并准备第二天处理。","陈默负责大量工程管理；若宋言继续调查，他的操作最可能先被发现。","这说明陈默存在暴露风险，也存在阻止宋言继续调查的动机，但动机本身仍不能替代作案证据。"],"audio_clues":[],"text_clues":["clue_motive"],"room_refs":[],"set_flags":{"chen_exposure_risk":true,"chen_motive":true},"graph_targets":["ls_fact_major_suspicion"],"choices":[{"title":"返回调查调度","to":"ls_0001"}],"autosave":true},
+    {"node_id":"ls_a08","title":"王姨补充证词","icon_key":"phone","node_type":"行动结果","location":"助手通话记录","time_label":"动态","characters":["assistant","witness_wang_aunt"],"body":["在保护人员陪同下，王姨补充说21:38的嗡声之后，控制室方向有人快速关上了门。她只能确认方向，无法看清人物。"],"audio_clues":[],"text_clues":[],"room_refs":[],"set_flags":{"wang_second_statement":true},"choices":[{"title":"返回调查调度","to":"ls_0001"}],"autosave":true},
+    {"node_id":"ls_a09","title":"公开设备资料","icon_key":"document","node_type":"行动结果","location":"助手回传","time_label":"动态","characters":["assistant"],"body":["公开手册确认CTRL MON用于控制室监听，STUDIO MON用于向主录音室监听系统发送声音。Talkback则是独立的对讲通道。","资料只解释功能，不证明当晚由谁操作。"],"audio_clues":[],"text_clues":[],"room_refs":[],"set_flags":{"public_device_docs":true},"choices":[{"title":"返回调查调度","to":"ls_0001"}],"autosave":true},
+    {"node_id":"ls_p01","title":"初步尸检","icon_key":"document","node_type":"官方记录","location":"警察回传","time_label":"动态","characters":["police_contact","victim_song_yan"],"body":["初步尸检认为死亡明显早于22:40，大致发生于21:20—22:00之间。","报告无法把死亡时间精确到21:38，也没有支持宋言22:40仍然存活。"],"audio_clues":[],"text_clues":["clue_autopsy_window"],"room_refs":[],"set_flags":{"autopsy_window_received":true},"graph_targets":["ls_fact_time_contradiction"],"choices":[{"title":"返回调查调度","to":"ls_0001"}],"autosave":true},
+    {"node_id":"ls_p02","title":"正式证词笔录","icon_key":"document","node_type":"官方记录","location":"警察回传","time_label":"动态","characters":["police_contact"],"body":["正式笔录确认陈默坚持自己始终在控制室，并把22:40听见声音作为宋言存活的依据。","笔录没有任何目击者直接确认22:40宋言本人位于主录音室。"],"audio_clues":[],"text_clues":[],"room_refs":[],"set_flags":{"official_statements_received":true},"choices":[{"title":"返回调查调度","to":"ls_0001"}],"autosave":true},
+    {"node_id":"ls_p03","title":"控制室操作记录","icon_key":"document","node_type":"电子记录","location":"警察回传","time_label":"动态","characters":["police_contact","suspect_chen_mo"],"body":["22:39:58  Project Loaded","22:40:02  Playback Start","Output: CTRL MON / STUDIO MON","22:45:11  Talkback Active","记录只说明发生了加载、回放和通道输出，不直接解释它们的用途。"],"audio_clues":[],"text_clues":["clue_control_log"],"room_refs":[],"set_flags":{"control_log_received":true},"graph_targets":["ls_fact_playback_existing","ls_fact_fake_survival"],"choices":[{"title":"返回调查调度","to":"ls_0001"}],"autosave":true},
+    {"node_id":"ls_p04","title":"录音设备检查","icon_key":"investigation","node_type":"官方记录","location":"警察回传","time_label":"动态","characters":["police_contact"],"body":["设备故障并非自然形成。现场存在人为干预，并且实施者需要具备一定录音设备知识。","报告不包含任何可复现的危险操作步骤。"],"audio_clues":[],"text_clues":["clue_device_interference"],"room_refs":[],"set_flags":{"scene_manmade":true,"equipment_knowledge_required":true},"graph_targets":["ls_fact_major_suspicion"],"choices":[{"title":"返回调查调度","to":"ls_0001"}],"autosave":true},
+    {"node_id":"ls_p05","title":"赵一鸣通话记录","icon_key":"document","node_type":"官方记录","location":"警察回传","time_label":"动态","characters":["police_contact","manager_zhao_yiming"],"body":["通话记录与基站信息支持赵一鸣在关键时段位于录音楼外侧。他仍有争执动机，但目前缺少进入控制室或操作工程的条件。"],"audio_clues":[],"text_clues":[],"room_refs":[],"set_flags":{"zhao_calls_cleared":true},"choices":[{"title":"返回调查调度","to":"ls_0001"}],"autosave":true},
+    {"node_id":"ls_p06","title":"证人已受保护","icon_key":"phone","node_type":"行动结果","location":"警察回传","time_label":"动态","characters":["police_contact","witness_wang_aunt"],"body":["保护人员已经接到王姨，并将她转移至安全地点。她可以在21:30以后继续提供证词。"],"audio_clues":[],"text_clues":[],"room_refs":[],"set_flags":{"witness_protected":true},"choices":[{"title":"返回调查调度","to":"ls_0001"}],"autosave":true},
+    {"node_id":"ls_p07","title":"陈默已被控制","icon_key":"phone","node_type":"行动结果","location":"警察回传","time_label":"动态","characters":["police_contact","suspect_chen_mo"],"body":["警察已在截止前控制陈默，并封存他的控制室权限与随身设备。工程数据不会再被继续改写。"],"audio_clues":[],"text_clues":[],"room_refs":[],"set_flags":{"killer_controlled":true},"choices":[{"title":"推进至最终截止","action":"advance_investigation_time"},{"title":"返回调查调度","to":"ls_0001"}],"autosave":true},
+    {"node_id":"ls_p08","title":"深入讯问","icon_key":"phone","node_type":"行动结果","location":"警察回传","time_label":"动态","characters":["police_contact","suspect_chen_mo"],"body":["陈默承认自己启动过22:40回放，却仍否认参与宋言死亡。讯问结果补强了操作事实，但最终指认仍必须以已建立的证据链为界。"],"audio_clues":[],"text_clues":[],"room_refs":[],"set_flags":{"chen_interrogated":true},"choices":[{"title":"返回调查调度","to":"ls_0001"}],"autosave":true},
+    {"node_id":"ls_ev02_witness_risk","title":"陌生来电","icon_key":"phone","node_type":"定时事件","location":"调查终端","time_label":"20:50以后","characters":["witness_wang_aunt"],"body":["王姨收到陌生电话，对方准确说出了她推车经过录音室的时间。她在电话里明显紧张，现实风险已经形成。","应安排警察保护王姨；行动必须在21:30以前完成，而不是只在此前开始。"],"audio_clues":[],"text_clues":[],"room_refs":[],"set_flags":{"witness_at_risk":true},"choices":[{"id":"open_contacts","title":"打开电话簿联系警察","action":"open_phonebook"},{"title":"返回调查调度","to":"ls_0001"},{"title":"推进调查时间","action":"advance_investigation_time"}],"autosave":true},
+    {"node_id":"ls_ev03_safe","title":"21:30：证人安全","icon_key":"phone","node_type":"定时事件","location":"调查终端","time_label":"21:30","characters":["police_contact","witness_wang_aunt"],"body":["21:30，保护人员再次确认王姨安全。证人保护没有挤占助手的调查任务，两条路线已经并行完成。"],"audio_clues":[],"text_clues":[],"room_refs":[],"choices":[{"title":"返回调查调度","to":"ls_0001"}],"autosave":true},
+    {"node_id":"ls_f01_late","title":"迟到","icon_key":"failure","node_type":"失败结局","location":"调查终端","time_label":"21:30","characters":["witness_wang_aunt"],"body":["21:30，王姨失去联系。你掌握了证人受到关注的迹象，却没有在截止前完成保护。","调查必须回到最近的安全节点，重新分配有限的时间。"],"audio_clues":[],"text_clues":[],"room_refs":[],"is_failure_ending":true,"choices":[{"title":"返回最近安全节点","action":"load_last_safe_autosave"}],"autosave":false},
+    {"node_id":"ls_f02_blank_project","title":"空白工程","icon_key":"failure","node_type":"失败结局","location":"调查终端","time_label":"22:45","characters":["suspect_chen_mo"],"body":["22:45，控制室工程被清空。陈默已经离开，关键操作记录失去继续核实的对象。","你建立了怀疑，却没有在截止前完成控制行动。"],"audio_clues":[],"text_clues":[],"room_refs":[],"is_failure_ending":true,"choices":[{"title":"返回最近安全节点","action":"load_last_safe_autosave"}],"autosave":false},
+    {"node_id":"ls_final_accusation","title":"最终指认","icon_key":"deduction","node_type":"结论节点","location":"调查终端","time_label":"22:45","characters":["player","suspect_chen_mo"],"body":["22:40播放的是经过编辑的已有音频，并经STUDIO MON送入主录音室。陈默始终位于能够完成这些操作的控制室。","尸检、设备检查、工程权限和动机共同指向陈默。他具备制造假存活时间、伪造事故现场并阻止宋言继续调查的条件。"],"audio_clues":[],"text_clues":[],"room_refs":[],"choices":[{"title":"指认陈默并结束Demo","to":"ls_complete"}],"autosave":true},
+    {"node_id":"ls_complete","title":"最后一次试麦","icon_key":"archive","node_type":"案件完成","location":"调查终端","time_label":"结案","characters":["player"],"body":["证人安全，嫌疑人已被控制，污染推理的前提也被新证据推翻。","本次Demo展示了预设关键词、正确与错误连接、并行行动、定时事件、证人保护、污染节点重构和最终指认。"],"audio_clues":[],"text_clues":[],"room_refs":[],"set_flags":{"last_soundcheck_completed":true},"choices":[{"title":"返回案件选择","action":"return_to_archive"}],"autosave":true},
+
+    {"node_id":"ls_fact_surface_alive","title":"22:40宋言正在试麦","icon_key":"deduction","node_type":"表面判断","location":"图谱","time_label":"推理","characters":[],"body":["把出现宋言声音暂时解释为宋言正在试麦。该前提仍需其他证据核实。"],"graph_only":true,"choices":[],"autosave":false},
+    {"node_id":"ls_pollution_no_opportunity","title":"陈默缺乏直接作案机会","icon_key":"deduction","node_type":"推理节点","location":"图谱","time_label":"推理","characters":[],"body":["若22:40宋言确实在主录音室实时试麦，而陈默一直在控制室，那么陈默看似缺乏直接机会。"],"graph_only":true,"choices":[],"autosave":false},
+    {"node_id":"ls_fact_time_contradiction","title":"时间矛盾","icon_key":"deduction","node_type":"事实判断","location":"图谱","time_label":"推理","characters":[],"body":["死亡早于22:40，与表面试麦时间线冲突。"],"graph_only":true,"choices":[],"autosave":false},
+    {"node_id":"ls_fact_near_death_time","title":"21:38可能接近真实死亡时间","icon_key":"deduction","node_type":"线索判断","location":"图谱","time_label":"推理","characters":[],"body":["21:38是证人听见异常声响的时间，只能视作候选时间。"],"graph_only":true,"choices":[],"autosave":false},
+    {"node_id":"ls_fact_cart_recorded","title":"试麦录音记录到了清洁车声音","icon_key":"deduction","node_type":"事实判断","location":"图谱","time_label":"推理","characters":[],"body":["背景声与清洁车固定节奏摩擦声一致。"],"graph_only":true,"choices":[],"autosave":false},
+    {"node_id":"ls_fact_not_main_studio","title":"至少部分声音不是在主录音室录制","icon_key":"deduction","node_type":"事实判断","location":"图谱","time_label":"推理","characters":[],"body":["隔音条件与清晰清洁车声不能同时成立。"],"graph_only":true,"choices":[],"autosave":false},
+    {"node_id":"ls_fact_audio_edited","title":"22:40试麦文件存在异常编辑","icon_key":"deduction","node_type":"事实判断","location":"图谱","time_label":"推理","characters":[],"body":["重复素材与异常背景声表明文件经过编辑。"],"graph_only":true,"choices":[],"autosave":false},
+    {"node_id":"ls_fact_playback_existing","title":"22:40播放的是已有音频内容","icon_key":"deduction","node_type":"事实判断","location":"图谱","time_label":"推理","characters":[],"body":["Playback Start与异常编辑共同支持已有素材回放。"],"graph_only":true,"choices":[],"autosave":false},
+    {"node_id":"ls_fact_fake_survival","title":"陈默具备制造假存活时间的条件","icon_key":"deduction","node_type":"事实判断","location":"图谱","time_label":"推理","characters":[],"body":["控制室回放可通过STUDIO MON送入主录音室，22:40声音不再能证明宋言存活。"],"graph_only":true,"choices":[],"autosave":false},
+    {"node_id":"ls_fact_major_suspicion","title":"陈默存在重大嫌疑","icon_key":"deduction","node_type":"结论节点","location":"图谱","time_label":"推理","characters":["suspect_chen_mo"],"body":["证词不成立、制造假时间的条件、人为现场和动机共同形成重大嫌疑。"],"graph_only":true,"choices":[],"autosave":false}
+  ]
+}

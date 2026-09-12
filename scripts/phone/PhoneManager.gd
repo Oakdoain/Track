@@ -8,6 +8,8 @@ signal transcript_character_revealed(profile_id: String, character: String)
 
 const TRANSCRIPT_PRE_DELAY := 0.30
 const TRANSCRIPT_CHARACTERS_PER_SECOND := 23.0
+const CALL_END_HOLD_SECONDS := 0.45
+const OUTGOING_CONNECT_DELAY := 1.8
 
 var data_loader := PhoneDataLoader.new()
 var runtime_state: CaseRuntimeState
@@ -35,7 +37,23 @@ func update(delta: float) -> void:
 	if runtime_state == null or runtime_state.active_call.is_empty() or delta <= 0.0:
 		return
 	var active := runtime_state.active_call
-	if str(active.get("status", "")) != "active":
+	var status := str(active.get("status", ""))
+	if status == "ending":
+		if bool(active.get("call_end_audio_completed", false)):
+			active["call_end_elapsed"] = maxf(0.0, float(active.get("call_end_elapsed", 0.0))) + delta
+			runtime_state.active_call = active
+			if float(active["call_end_elapsed"]) >= CALL_END_HOLD_SECONDS:
+				_finalize_ended_call()
+		return
+	if status == "outgoing_waiting":
+		var total := maxf(0.1, float(active.get("outgoing_connect_total", OUTGOING_CONNECT_DELAY)))
+		var elapsed := minf(total, maxf(0.0, float(active.get("outgoing_connect_elapsed", 0.0))) + delta)
+		active["outgoing_connect_elapsed"] = elapsed
+		runtime_state.active_call = active
+		if elapsed >= total:
+			_answer_outgoing_call()
+		return
+	if status != "active":
 		return
 	if bool(active.get("is_waiting_message", false)):
 		var total := maxf(0.0, float(active.get("transcript_delay_total", TRANSCRIPT_PRE_DELAY)))
@@ -183,11 +201,92 @@ func request_outgoing_call(contact_id: String) -> bool:
 	for call_data in data_loader.get_calls():
 		if str(call_data.get("contact_id", "")) != contact_id:
 			continue
+		if str(call_data.get("direction", "")) == "outgoing" and _conditions_match(call_data.get("start_conditions", {})):
+			return _begin_call(call_data, "outgoing")
+	for call_data in data_loader.get_calls():
+		if str(call_data.get("contact_id", "")) != contact_id:
+			continue
 		var retry_flag := str(call_data.get("reject_retry_flag", ""))
 		if retry_flag != "" and bool(runtime_state.flags.get(retry_flag, false)) and _conditions_match(call_data.get("start_conditions", {})):
 			return _begin_call(call_data, "outgoing_retry")
-	print("PhoneManager: outgoing call is not implemented for contact: " + contact_id)
+	if contact_id == "assistant":
+		feedback_requested.emit("先完成 TH-0731 的复核，查完之后再联系艾琳。")
+	else:
+		feedback_requested.emit("当前联系人暂时没有可用通话。")
 	return false
+
+
+func begin_action_dispatch(
+	contact_id: String,
+	choices: Array[Dictionary],
+	message: String,
+	subtitle: String = "调查调度"
+) -> bool:
+	if runtime_state == null or not runtime_state.has_discovered_contact(contact_id):
+		return false
+	if not runtime_state.active_call.is_empty() and str(runtime_state.active_call.get("kind", "")) != "action_dispatch":
+		return false
+	var transcript: Array[Dictionary] = []
+	if message != "":
+		transcript.append({
+			"speaker": contact_id,
+			"text": message,
+			"message_id": "dispatch:intro:" + contact_id,
+			"keywords": [],
+			"visible_characters": message.length(),
+			"reveal_completed": true
+		})
+	runtime_state.active_call = {
+		"kind": "action_dispatch",
+		"call_id": "action_dispatch:%s:%d" % [contact_id, Time.get_ticks_msec()],
+		"contact_id": contact_id,
+		"direction": "outgoing",
+		"status": "active",
+		"view_subtitle": subtitle,
+		"message_id": "dispatch",
+		"transcript": transcript,
+		"choices_made": [],
+		"presented_choices": choices.duplicate(true),
+		"waiting_for_keyword": "",
+		"is_waiting_message": false,
+		"revealing_transcript_index": -1,
+		"message_reveal_completed": true
+	}
+	state_changed.emit()
+	return true
+
+
+func complete_action_dispatch(choice_id: String, choice_text: String, response_text: String) -> void:
+	if runtime_state == null or str(runtime_state.active_call.get("kind", "")) != "action_dispatch":
+		return
+	var active := runtime_state.active_call
+	var transcript: Array = active.get("transcript", [])
+	transcript.append({
+		"speaker": "player",
+		"text": choice_text,
+		"message_id": "dispatch:choice:" + choice_id,
+		"keywords": [],
+		"visible_characters": choice_text.length(),
+		"reveal_completed": true
+	})
+	if response_text != "":
+		transcript.append({
+			"speaker": str(active.get("contact_id", "assistant")),
+			"text": response_text,
+			"message_id": "dispatch:response:" + choice_id,
+			"keywords": [],
+			"visible_characters": response_text.length(),
+			"reveal_completed": true
+		})
+	active["transcript"] = transcript
+	active["presented_choices"] = []
+	active["choices_made"] = [{"message_id": "dispatch", "choice_id": choice_id}]
+	runtime_state.active_call = active
+	state_changed.emit()
+
+
+func is_action_dispatch_active() -> bool:
+	return runtime_state != null and str(runtime_state.active_call.get("kind", "")) == "action_dispatch"
 
 
 func has_visible_call() -> bool:
@@ -196,6 +295,28 @@ func has_visible_call() -> bool:
 
 func get_active_call() -> Dictionary:
 	return runtime_state.active_call.duplicate(true) if runtime_state != null else {}
+
+
+func mark_call_end_audio_started(started: bool) -> void:
+	if runtime_state == null or str(runtime_state.active_call.get("status", "")) != "ending":
+		return
+	var active := runtime_state.active_call
+	active["call_end_audio_started"] = started
+	if not started:
+		active["call_end_audio_completed"] = true
+	active["call_end_elapsed"] = 0.0
+	runtime_state.active_call = active
+	state_changed.emit()
+
+
+func notify_call_end_audio_finished() -> void:
+	if runtime_state == null or str(runtime_state.active_call.get("status", "")) != "ending":
+		return
+	var active := runtime_state.active_call
+	active["call_end_audio_completed"] = true
+	active["call_end_elapsed"] = 0.0
+	runtime_state.active_call = active
+	state_changed.emit()
 
 
 func get_contact(contact_id: String) -> Dictionary:
@@ -232,11 +353,12 @@ func _begin_call(call_data: Dictionary, direction: String) -> bool:
 	if call_id == "" or contact_id == "":
 		return false
 	runtime_state.add_discovered_contact(contact_id)
+	var waiting_status := "incoming_waiting" if direction == "incoming" else "outgoing_waiting"
 	runtime_state.active_call = {
 		"call_id": call_id,
 		"contact_id": contact_id,
 		"direction": direction,
-		"status": "incoming_waiting",
+		"status": waiting_status,
 		"message_id": str(call_data.get("entry_message_id", "")),
 		"transcript": [],
 		"choices_made": [],
@@ -255,10 +377,33 @@ func _begin_call(call_data: Dictionary, direction: String) -> bool:
 		"pending_choice_id": "",
 		"pending_choice_next": "",
 		"pending_choice_end_call": false,
-		"pending_choice_effects": []
+		"pending_choice_effects": [],
+		"call_end_sequence_active": false,
+		"call_end_elapsed": 0.0,
+		"call_end_audio_started": false,
+		"call_end_audio_completed": false,
+		"call_end_next_node_id": "",
+		"outgoing_connect_elapsed": 0.0,
+		"outgoing_connect_total": float(call_data.get("connect_delay", OUTGOING_CONNECT_DELAY))
 	}
 	state_changed.emit()
 	return true
+
+
+func _answer_outgoing_call() -> void:
+	if runtime_state == null or str(runtime_state.active_call.get("status", "")) != "outgoing_waiting":
+		return
+	var active := runtime_state.active_call
+	var entry_message_id := str(active.get("message_id", ""))
+	active["status"] = "active"
+	active["message_id"] = ""
+	active["outgoing_connect_elapsed"] = 0.0
+	active["transcript"] = []
+	active["choices_made"] = []
+	active["presented_choices"] = []
+	active["waiting_for_keyword"] = ""
+	runtime_state.active_call = active
+	_schedule_message(entry_message_id)
 
 
 func _schedule_message(message_id: String) -> void:
@@ -396,6 +541,7 @@ func _complete_current_message_reveal() -> void:
 	runtime_state.active_call = active
 	state_changed.emit()
 	if bool(message.get("end_call", false)):
+		_apply_choice_effects(message)
 		_finish_current_call()
 		return
 	if str(active.get("waiting_for_keyword", "")) != "" or not (active.get("presented_choices", []) as Array).is_empty():
@@ -443,7 +589,23 @@ func _transcript_punctuation_pause(character: String) -> float:
 func _finish_current_call() -> void:
 	var active := runtime_state.active_call
 	var call_data := data_loader.get_call(str(active.get("call_id", "")))
-	var next_node_id := str(call_data.get("completion_node_id", ""))
+	active["status"] = "ending"
+	active["presented_choices"] = []
+	active["waiting_for_keyword"] = ""
+	active["is_waiting_message"] = false
+	active["pending_message_id"] = ""
+	active["voice_profile_id"] = ""
+	active["call_end_sequence_active"] = true
+	active["call_end_elapsed"] = 0.0
+	active["call_end_audio_started"] = false
+	active["call_end_audio_completed"] = false
+	active["call_end_next_node_id"] = str(call_data.get("completion_node_id", ""))
+	runtime_state.active_call = active
+	state_changed.emit()
+
+
+func _finalize_ended_call() -> void:
+	var next_node_id := str(runtime_state.active_call.get("call_end_next_node_id", ""))
 	runtime_state.active_call.clear()
 	state_changed.emit()
 	call_ended.emit(next_node_id)
@@ -487,6 +649,18 @@ func _validate_restored_call() -> void:
 	if runtime_state.active_call.is_empty():
 		return
 	var active := runtime_state.active_call
+	if str(active.get("kind", "")) == "action_dispatch":
+		var dispatch_contact_id := str(active.get("contact_id", ""))
+		if dispatch_contact_id == "" or data_loader.get_contact(dispatch_contact_id).is_empty():
+			runtime_state.active_call.clear()
+			return
+		active["status"] = "active"
+		active["is_waiting_message"] = false
+		active["waiting_for_keyword"] = ""
+		active["revealing_transcript_index"] = -1
+		active["message_reveal_completed"] = true
+		runtime_state.active_call = active
+		return
 	var call_id := str(active.get("call_id", ""))
 	var message_id := str(active.get("message_id", ""))
 	var pending_message_id := str(active.get("pending_message_id", ""))
@@ -494,6 +668,20 @@ func _validate_restored_call() -> void:
 		push_warning("PhoneManager: cleared active call absent from current phone data: " + call_id)
 		runtime_state.active_call.clear()
 		return
+	if str(active.get("status", "")) == "ending":
+		active["presented_choices"] = []
+		active["waiting_for_keyword"] = ""
+		active["call_end_sequence_active"] = true
+		active["call_end_elapsed"] = maxf(0.0, float(active.get("call_end_elapsed", 0.0)))
+		var had_started := bool(active.get("call_end_audio_started", false))
+		active["call_end_audio_started"] = had_started
+		active["call_end_audio_completed"] = bool(active.get("call_end_audio_completed", false)) or had_started
+		active["call_end_next_node_id"] = str(active.get("call_end_next_node_id", ""))
+		runtime_state.active_call = active
+		return
+	if str(active.get("status", "")) == "outgoing_waiting":
+		active["outgoing_connect_elapsed"] = maxf(0.0, float(active.get("outgoing_connect_elapsed", 0.0)))
+		active["outgoing_connect_total"] = maxf(0.1, float(active.get("outgoing_connect_total", OUTGOING_CONNECT_DELAY)))
 	if message_id != "" and data_loader.get_message(message_id).is_empty():
 		push_warning("PhoneManager: cleared active call with missing current message: " + message_id)
 		runtime_state.active_call.clear()

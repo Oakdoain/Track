@@ -1,5 +1,7 @@
 extends Node
 
+signal call_ended_busy_finished
+
 const SOUND_PATHS := {
 	"ui_click": "res://assets/third_party/kenney/audio/ui/ui_click.ogg",
 	"ui_backtrack": "res://assets/third_party/kenney/audio/ui/ui_backtrack.ogg",
@@ -16,17 +18,23 @@ const DEFAULT_VOLUME_DB := -16.0
 const INCOMING_RING_PATH := "res://assets/audio/ui/phone/incoming_ring_loop.ogg"
 const OUTGOING_RINGBACK_PATH := "res://assets/audio/ui/phone/outgoing_ringback.ogg"
 const NODE_TYPING_PATH := "res://assets/audio/ui/text/node_typing_loop.ogg"
+const TUTORIAL_ATTENTION_PATH := "res://assets/audio/ui/tutorial/tutorial_attention_tick.ogg"
+const CALL_ENDED_BUSY_PATH := "res://assets/audio/ui/phone/call_ended_busy_three.ogg"
 const PHONE_FADE_SECONDS := 0.12
 const TYPING_FADE_SECONDS := 0.10
 const NODE_TYPING_VOLUME_DB := -26.0
 const PHONE_RING_VOLUME_DB := -14.0
 const OUTGOING_RINGBACK_VOLUME_DB := -17.0
+const TUTORIAL_ATTENTION_VOLUME_DB := -23.0
+const CALL_ENDED_BUSY_VOLUME_DB := -18.0
 
 var _players: Array[AudioStreamPlayer] = []
 var _last_played_msec: Dictionary = {}
 var _volume_db: float = DEFAULT_VOLUME_DB
 var _phone_loop_player: AudioStreamPlayer
 var _typing_loop_player: AudioStreamPlayer
+var _tutorial_attention_player: AudioStreamPlayer
+var _phone_one_shot_player: AudioStreamPlayer
 var _phone_audio_mode: String = ""
 var _missing_audio_warnings: Dictionary = {}
 var _fade_tweens: Dictionary = {}
@@ -46,12 +54,23 @@ func _ready() -> void:
 	_typing_loop_player = AudioStreamPlayer.new()
 	_typing_loop_player.name = "NodeTypingLoopPlayer"
 	add_child(_typing_loop_player)
+	_tutorial_attention_player = AudioStreamPlayer.new()
+	_tutorial_attention_player.name = "TutorialAttentionPlayer"
+	add_child(_tutorial_attention_player)
+	_phone_one_shot_player = AudioStreamPlayer.new()
+	_phone_one_shot_player.name = "PhoneOneShotPlayer"
+	_phone_one_shot_player.finished.connect(_on_phone_one_shot_finished)
+	add_child(_phone_one_shot_player)
 	if not ResourceLoader.exists(INCOMING_RING_PATH):
 		_warn_missing_once("incoming_ring", INCOMING_RING_PATH)
 	if not ResourceLoader.exists(OUTGOING_RINGBACK_PATH):
 		_warn_missing_once("outgoing_ring", OUTGOING_RINGBACK_PATH)
 	if not ResourceLoader.exists(NODE_TYPING_PATH):
 		_warn_missing_once("node_typing", NODE_TYPING_PATH)
+	if not ResourceLoader.exists(TUTORIAL_ATTENTION_PATH):
+		_warn_missing_once("tutorial_attention", TUTORIAL_ATTENTION_PATH)
+	if not ResourceLoader.exists(CALL_ENDED_BUSY_PATH):
+		_warn_missing_once("call_ended_busy", CALL_ENDED_BUSY_PATH)
 
 
 func play(event_key: String) -> void:
@@ -108,6 +127,19 @@ func stop_phone_audio() -> void:
 	_set_phone_audio_mode("")
 
 
+func play_tutorial_attention_tick() -> void:
+	_play_one_shot(_tutorial_attention_player, TUTORIAL_ATTENTION_PATH, "tutorial_attention", TUTORIAL_ATTENTION_VOLUME_DB, false)
+
+
+func play_call_ended_busy() -> bool:
+	_set_phone_audio_mode("")
+	return _play_one_shot(_phone_one_shot_player, CALL_ENDED_BUSY_PATH, "call_ended_busy", CALL_ENDED_BUSY_VOLUME_DB, true)
+
+
+func stop_call_ended_busy() -> void:
+	_stop_player_immediately(_phone_one_shot_player)
+
+
 func start_node_typing() -> void:
 	_start_loop(_typing_loop_player, NODE_TYPING_PATH, "node_typing", NODE_TYPING_VOLUME_DB)
 
@@ -124,6 +156,10 @@ func set_presentation_paused(paused: bool) -> void:
 		_phone_loop_player.stream_paused = paused
 	if _typing_loop_player != null:
 		_typing_loop_player.stream_paused = paused
+	if _tutorial_attention_player != null:
+		_tutorial_attention_player.stream_paused = paused
+	if _phone_one_shot_player != null:
+		_phone_one_shot_player.stream_paused = paused
 
 
 func _set_phone_audio_mode(mode: String) -> void:
@@ -162,6 +198,30 @@ func _start_loop(player: AudioStreamPlayer, path: String, warning_key: String, v
 	player.volume_db = volume_db
 	player.stream_paused = _presentation_paused
 	player.play()
+
+
+func _play_one_shot(player: AudioStreamPlayer, path: String, warning_key: String, volume_db: float, restart: bool) -> bool:
+	if player == null:
+		return false
+	if player.playing and not restart:
+		return false
+	if not ResourceLoader.exists(path):
+		_warn_missing_once(warning_key, path)
+		return false
+	var resource := ResourceLoader.load(path)
+	if not (resource is AudioStream):
+		_warn_missing_once(warning_key, path)
+		return false
+	player.stop()
+	player.stream = resource as AudioStream
+	player.volume_db = volume_db
+	player.stream_paused = _presentation_paused
+	player.play()
+	return true
+
+
+func _on_phone_one_shot_finished() -> void:
+	call_ended_busy_finished.emit()
 
 
 func _fade_out(player: AudioStreamPlayer, duration: float) -> void:

@@ -1,0 +1,19 @@
+{
+  "audio_clues": [
+    {
+      "id": "audio_soundcheck_2240",
+      "title": "22:40试麦整理音频",
+      "file": "res://data/cases/case_02/last_soundcheck/media/soundcheck_2240.ogg",
+      "duration": 72.0,
+      "type": "试麦录音",
+      "source": "控制室工程导出",
+      "summary": "经助手整理的试麦音频，包含人声、背景滚轮声和疑似重复段落。",
+      "source_node": "ls_a03",
+      "waveform_file": "res://data/cases/case_02/last_soundcheck/media/soundcheck_2240_waveform.json",
+      "important_timestamps": [
+        {"time":18.4,"label":"背景滚轮声","description":"背景出现固定节奏摩擦声。"},
+        {"time":43.8,"label":"重复声音片段","description":"与前段人声和底噪边缘高度相似。"}
+      ]
+    }
+  ]
+}

@@ -1,18 +1,7 @@
 {
-	"contacts": [
-		{
-			"id": "assistant",
-			"display_name": "调查助理",
-			"icon_key": "phone",
-			"voice_profile_id": "assistant"
-		},
-		{
-			"id": "police_contact",
-			"display_name": "警察联络处",
-			"icon_key": "phone"
-		}
-	],
-	"initial_contacts": [
-		"assistant"
-	]
+  "contacts": [
+    {"id": "assistant", "display_name": "艾琳", "icon_key": "phone", "voice_profile_id": "assistant"},
+    {"id": "police_contact", "display_name": "警察联络处", "icon_key": "phone"}
+  ],
+  "initial_contacts": ["assistant"]
 }

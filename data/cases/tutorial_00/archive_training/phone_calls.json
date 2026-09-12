@@ -1,119 +1,133 @@
 {
-	"calls": [
-		{
-			"id": "tutorial_assistant_opening",
-			"contact_id": "assistant",
-			"direction": "incoming",
-			"entry_message_id": "assistant_call_001",
-			"completion_node_id": "tutorial_0001",
-			"reject_retry_flag": "tutorial_assistant_call_retry_available",
-			"start_conditions": {
-				"case_id": "tutorial_00",
-				"node_id": "tutorial_0000",
-				"forbidden_flags": [
-					"tutorial_assistant_call_completed"
-				]
-			}
-		}
-	],
-	"messages": [
-		{
-			"id": "assistant_call_001",
-			"speaker": "assistant",
-			"text": "你总算醒了。",
-			"choices": [
-				{
-					"id": "ask_time",
-					"text": "现在几点了？",
-					"next": "assistant_call_002a"
-				},
-				{
-					"id": "complain_wakeup",
-					"text": "你打电话就是为了叫醒我？",
-					"next": "assistant_call_002b"
-				}
-			]
-		},
-		{
-			"id": "assistant_call_002a",
-			"speaker": "assistant",
-			"text": "下午两点十七分。",
-			"next": "assistant_call_003"
-		},
-		{
-			"id": "assistant_call_002b",
-			"speaker": "assistant",
-			"text": "要只是叫醒你，我会让电话多响一会儿。",
-			"next": "assistant_call_003"
-		},
-		{
-			"id": "assistant_call_003",
-			"speaker": "assistant",
-			"text": "你桌上有一份档案。",
-			"next": "assistant_call_003b"
-		},
-		{
-			"id": "assistant_call_003b",
-			"speaker": "assistant",
-			"text": "档案室刚才复核时发现，登记内容和现存材料对不上。",
-			"next": "assistant_call_004"
-		},
-		{
-			"id": "assistant_call_004",
-			"speaker": "assistant",
-			"text": "我需要你重新检查一遍，确认究竟发生了什么。",
-			"next": "assistant_call_005"
-		},
-		{
-			"id": "assistant_call_005",
-			"speaker": "assistant",
-			"text": "先确认发生了什么。不要一开始就猜是谁做的。",
-			"choices": [
-				{
-					"id": "ask_what_to_check",
-					"text": "我需要检查什么？",
-					"next": "assistant_call_006"
-				}
-			]
-		},
-		{
-			"id": "assistant_call_006",
-			"speaker": "assistant",
-			"text": "档案袋、封存记录，还有里面的材料。先从你认为合适的地方开始。",
-			"next": "assistant_call_007"
-		},
-		{
-			"id": "assistant_call_007",
-			"speaker": "assistant",
-			"text": "正式案件里，如果需要封锁现场或者请求协助，就联系警察联络处。有需要的时候，记得打过去。",
-			"keywords": [
-				{
-					"keyword_id": "contact_police",
-					"text": "警察联络处",
-					"occurrence_index": 0
-				}
-			],
-			"wait_for_keyword": "contact_police",
-			"next": "assistant_call_008"
-		},
-		{
-			"id": "assistant_call_008",
-			"speaker": "assistant",
-			"text": "先检查桌上的档案。查完之后再联系我。只汇报你真正能够证明的部分。",
-			"choices": [
-				{
-					"id": "inspect_archive_first",
-					"text": "我先检查档案。",
-					"end_call": true,
-					"effects": [
-						{
-							"type": "set_flag",
-							"flag_id": "tutorial_assistant_call_completed",
-							"value": true
-						}
-					]
-				}
-			]
-		}
-	]
+  "calls": [
+    {
+      "id": "tutorial_final_report",
+      "contact_id": "assistant",
+      "direction": "outgoing",
+      "entry_message_id": "erin_report_001",
+      "completion_node_id": "tutorial_0017",
+      "connect_delay": 1.8,
+      "start_conditions": {
+        "case_id": "tutorial_00",
+        "required_flags": {"tutorial_report_ready": true},
+        "forbidden_flags": ["tutorial_final_report_completed"]
+      }
+    },
+    {
+      "id": "tutorial_assistant_opening",
+      "contact_id": "assistant",
+      "direction": "incoming",
+      "entry_message_id": "assistant_call_001",
+      "completion_node_id": "tutorial_0001",
+      "reject_retry_flag": "tutorial_assistant_call_retry_available",
+      "start_conditions": {
+        "case_id": "tutorial_00",
+        "node_id": "tutorial_0000",
+        "forbidden_flags": ["tutorial_assistant_call_completed"]
+      }
+    }
+  ],
+  "messages": [
+    {
+      "id": "assistant_call_001",
+      "speaker": "assistant",
+      "text": "你总算醒了。",
+      "choices": [
+        {"id": "ask_time", "text": "现在几点了？", "next": "assistant_call_002a"},
+        {"id": "complain_wakeup", "text": "你打电话就是为了叫醒我？", "next": "assistant_call_002b"}
+      ]
+    },
+    {"id": "assistant_call_002a", "speaker": "assistant", "text": "下午两点十七分。", "next": "assistant_call_003"},
+    {"id": "assistant_call_002b", "speaker": "assistant", "text": "要只是叫醒你，我会让电话多响一会儿。", "next": "assistant_call_003"},
+    {"id": "assistant_call_003", "speaker": "assistant", "text": "我不是来提醒你作息的。", "next": "assistant_call_003b"},
+    {"id": "assistant_call_003b", "speaker": "assistant", "text": "你桌上有一只棕色档案袋，编号 TH-0731。档案系统刚才进行例行复核时，发现登记内容和现存材料可能对不上。", "next": "assistant_call_004"},
+    {"id": "assistant_call_004", "speaker": "assistant", "text": "你重新检查一遍。先确认档案袋的封存状态，再核对归档清单和里面的材料。", "next": "assistant_call_005"},
+    {
+      "id": "assistant_call_005",
+      "speaker": "assistant",
+      "text": "查完以后，从电话簿打给我。只汇报你真正能够证明的部分。",
+      "choices": [
+        {"id": "ask_other_contacts", "text": "我还需要联系其他人吗？", "next": "assistant_call_006"}
+      ]
+    },
+    {
+      "id": "assistant_call_006",
+      "speaker": "assistant",
+      "text": "正式案件中，如果需要封锁现场或者请求调查协助，就联系警察联络处。我把联系方式发给你，有需要时记得使用。",
+      "keywords": [
+        {"keyword_id": "contact_police", "text": "警察联络处", "occurrence_index": 0}
+      ],
+      "wait_for_keyword": "contact_police",
+      "next": "assistant_call_008"
+    },
+    {
+      "id": "assistant_call_007",
+      "speaker": "assistant",
+      "text": "正式案件中，如果需要封锁现场或者请求调查协助，就联系警察联络处。我把联系方式发给你，有需要时记得使用。",
+      "keywords": [
+        {"keyword_id": "contact_police", "text": "警察联络处", "occurrence_index": 0}
+      ],
+      "wait_for_keyword": "contact_police",
+      "next": "assistant_call_008"
+    },
+    {
+      "id": "assistant_call_008",
+      "speaker": "assistant",
+      "text": "先检查桌上的档案。查完再联系我。",
+      "choices": [
+        {
+          "id": "inspect_archive_first",
+          "text": "我先检查档案。",
+          "end_call": true,
+          "effects": [
+            {"type": "set_flag", "flag_id": "tutorial_assistant_call_completed", "value": true}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "erin_report_001",
+      "speaker": "assistant",
+      "text": "查完了？",
+      "choices": [
+        {"id": "report_overreach", "text": "档案袋被人重新打开过，证人陈述记录就是在那次开启中被取走的。", "next": "erin_report_overreach_001"},
+        {"id": "report_incomplete", "text": "档案里好像少了一份材料，其他情况还不能确定。", "next": "erin_report_incomplete_001"},
+        {"id": "report_supported", "text": "TH-0731 的封口棉线与档案袋本体的老化状态不一致，归档清单中登记的证人陈述记录目前也不在袋内。\n\n可以确认封口状态异常，现存材料与归档清单不一致。但两项异常之间的具体因果、发生时间以及责任人，目前都没有足够证据确认。", "next": "erin_report_supported_001"}
+      ]
+    },
+    {"id": "erin_report_overreach_001", "speaker": "assistant", "text": "你把两项异常直接组成了一条尚未被证明的因果关系。", "next": "erin_report_overreach_002"},
+    {"id": "erin_report_overreach_002", "speaker": "assistant", "text": "封口异常和材料缺失都已经确认，但你还不能证明它们发生于同一次行为。", "next": "erin_report_overreach_003"},
+    {
+      "id": "erin_report_overreach_003",
+      "speaker": "assistant",
+      "text": "把已经确认的事实和仍然只是可能的部分分开，再说一次。",
+      "choices": [
+        {"id": "report_overreach_retry", "text": "档案袋被人重新打开过，证人陈述记录就是在那次开启中被取走的。", "next": "erin_report_overreach_001"},
+        {"id": "report_incomplete_retry_a", "text": "档案里好像少了一份材料，其他情况还不能确定。", "next": "erin_report_incomplete_001"},
+        {"id": "report_supported_retry_a", "text": "TH-0731 的封口棉线与档案袋本体的老化状态不一致，归档清单中登记的证人陈述记录目前也不在袋内。\n\n可以确认封口状态异常，现存材料与归档清单不一致。但两项异常之间的具体因果、发生时间以及责任人，目前都没有足够证据确认。", "next": "erin_report_supported_001"}
+      ]
+    },
+    {"id": "erin_report_incomplete_001", "speaker": "assistant", "text": "这个说法没有超出证据范围，但你遗漏了已经确认的封口异常。", "next": "erin_report_incomplete_002"},
+    {
+      "id": "erin_report_incomplete_002",
+      "speaker": "assistant",
+      "text": "汇报不是越少越安全，已经成立的事实也应该完整说明。",
+      "choices": [
+        {"id": "report_overreach_retry_b", "text": "档案袋被人重新打开过，证人陈述记录就是在那次开启中被取走的。", "next": "erin_report_overreach_001"},
+        {"id": "report_incomplete_retry_b", "text": "档案里好像少了一份材料，其他情况还不能确定。", "next": "erin_report_incomplete_001"},
+        {"id": "report_supported_retry_b", "text": "TH-0731 的封口棉线与档案袋本体的老化状态不一致，归档清单中登记的证人陈述记录目前也不在袋内。\n\n可以确认封口状态异常，现存材料与归档清单不一致。但两项异常之间的具体因果、发生时间以及责任人，目前都没有足够证据确认。", "next": "erin_report_supported_001"}
+      ]
+    },
+    {"id": "erin_report_supported_001", "speaker": "assistant", "text": "收到。事实完整，边界也很清楚。", "next": "erin_report_supported_002"},
+    {"id": "erin_report_supported_002", "speaker": "assistant", "text": "调查不是把所有线索拼成最有戏剧性的答案，而是区分什么已经成立，什么仍然只是可能。", "next": "erin_report_supported_003"},
+    {
+      "id": "erin_report_supported_003",
+      "speaker": "assistant",
+      "text": "T-00 的复核到这里结束。",
+      "end_call": true,
+      "effects": [
+        {"type": "set_flag", "flag_id": "tutorial_final_report_completed", "value": true}
+      ]
+    }
+  ]
 }

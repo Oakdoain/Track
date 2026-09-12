@@ -1,0 +1,11 @@
+{
+  "clues": [
+    {"id":"clue_surface_voice","title":"22:40出现宋言声音","type":"时间线","source_node":"ls_0002","summary":"证词只能确认22:40出现宋言的声音。"},
+    {"id":"clue_autopsy_window","title":"死亡早于22:40","type":"官方记录","source_node":"ls_p01","summary":"死亡大致发生于21:20—22:00。"},
+    {"id":"clue_wang_time","title":"21:38与异常嗡声","type":"证人线索","source_node":"ls_a02","summary":"王姨在21:38听见异常嗡声。"},
+    {"id":"clue_audio_repeat","title":"重复声音片段","type":"音频线索","source_node":"ls_a03","summary":"试麦文件含重复素材和背景滚轮声。"},
+    {"id":"clue_control_log","title":"控制室操作记录","type":"电子记录","source_node":"ls_p03","summary":"22:40发生Playback并输出到CTRL MON与STUDIO MON。"},
+    {"id":"clue_device_interference","title":"人为干预","type":"设备检查","source_node":"ls_p04","summary":"设备异常并非自然故障。"},
+    {"id":"clue_motive","title":"暴露风险","type":"关系调查","source_node":"ls_a07","summary":"陈默面临未授权复制行为被发现的风险。"}
+  ]
+}

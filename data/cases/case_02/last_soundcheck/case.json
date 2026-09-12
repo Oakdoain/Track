@@ -1,0 +1,30 @@
+{
+  "case_id": "case_02",
+  "slice_id": "last_soundcheck",
+  "start_node_id": "ls_0000",
+  "title": "最后一次试麦",
+  "chapter_title": "最后一次试麦",
+  "code": "DEMO 02",
+  "capabilities": {
+    "investigation_time": true,
+    "parallel_actions": true,
+    "timed_events": true,
+    "pollution_nodes": true
+  },
+  "investigation_start_time": 1140,
+  "witness_risk_node_id": "ls_ev02_witness_risk",
+  "timeline": {
+    "start_time": 1140,
+    "end_time": 1365,
+    "roles": [
+      {"id":"player","display_name":"玩家","icon_key":"git-branch","color":"#143FA4","status":"统筹调查"},
+      {"id":"assistant","display_name":"助手·艾琳","icon_key":"file-text","color":"#3972C6","status":"空闲"},
+      {"id":"police","display_name":"警察","icon_key":"shield-check","color":"#5946A8","status":"空闲"},
+      {"id":"witness_wang_aunt","display_name":"王姨","icon_key":"spray-can","color":"#2D8C7B","status":"等待进一步联系"},
+      {"id":"singer_lin_wei","display_name":"林薇","icon_key":"mic-vocal","color":"#A14E82","status":"当前已知：离开录音楼层"},
+      {"id":"manager_zhao_yiming","display_name":"赵一鸣","icon_key":"briefcase-business","color":"#B46A2B","status":"当前已知：走廊短暂停留"},
+      {"id":"suspect_chen_mo","display_name":"陈默","icon_key":"headphones","color":"#9E2F3E","status":"当前已知：位于控制室"},
+      {"id":"victim_song_yan","display_name":"宋言","icon_key":"mic","color":"#6077A8","status":"表面记录：22:40试麦"}
+    ]
+  }
+}

@@ -1,600 +1,474 @@
 {
-	"case_id": "tutorial_00_archive_training",
-	"chapter_title": "调查流程训练",
-	"chapter_intro": "通过一份简化卷宗熟悉调查选择、关键词和图谱连接。",
-	"current_goal": "完成训练档案。",
-	"discovered_keywords": [],
-	"initial_node_id": "tutorial_0000",
-	"nodes": [
-		{
-			"node_id": "tutorial_0000",
-			"title": "开始之前",
-			"icon_key": "archive",
-			"node_type": "剧情节点",
-			"location": "档案库 / 调阅终端",
-			"time_label": "T-00",
-			"characters": ["你"],
-			"current_goal": "阅读当前记录。",
-			"body": [
-				"午后的光越过百叶窗，在桌面上切出几道倾斜的亮痕。",
-				"你伏在尚未整理完的文件旁睡着了。手臂压着一只牛皮纸档案袋，纸角在袖口留下了一道浅痕。",
-				"电话铃声响起时，你花了几秒钟，才重新辨认出自己所在的地方。"
-			],
-			"audio_clues": ["audio_tutorial"],
-			"text_clues": [],
-			"room_refs": [],
-			"choices": [],
-			"text_reveal": {
-				"mode": "first_visit",
-				"post_delay": 0.8
-			},
-			"after_reveal_events": [
-				{
-					"type": "incoming_call",
-					"call_id": "tutorial_assistant_opening",
-					"delay": 0.8
-				}
-			],
-			"autosave": true
-		},
-		{
-			"node_id": "tutorial_0001",
-			"title": "档案袋调查",
-			"icon_key": "investigation",
-			"node_type": "调查节点",
-			"location": "档案库 / 训练档案",
-			"time_label": "T-00",
-			"characters": ["你"],
-			"current_goal": "拆开档案袋。",
-			"set_case_state": {
-				"bag_opened": false,
-				"seal_state_preserved": true,
-				"seal_evidence_available": false,
-				"current_bag_route": ""
-			},
-			"body": [
-				"桌上的档案袋没有明显破损。封条仍压在袋口，标签上写着编号 T-00。",
-				"刚从午睡中醒来，思路还没有完全恢复。你下意识地把注意力放在了袋内材料上。"
-			],
-			"state_variants": [
-				{
-					"requires_flags": {"inspect_bag_option_unlocked": true},
-					"current_goal": "重新调查档案袋。",
-					"body": [
-						"你重新看向桌上的档案袋。",
-						"封条仍压在袋口，档案袋还保持着尚未被你打开的状态。",
-						"你所作出的选择都会影响之后的调查流程。但这并不意味着你必须害怕尝试。发现问题、回到关键节点，再验证另一种可能，本身也是调查的一部分。"
-					]
-				}
-			],
-			"audio_clues": [],
-			"text_clues": [],
-			"room_refs": [],
-			"choices": [
-				{
-					"id": "inspect_bag_before_opening",
-					"title": "检查档案袋",
-					"desc": "在打开之前观察档案袋的外部状态。",
-					"to": "tutorial_0013",
-					"requires_flags": {"inspect_bag_option_unlocked": true}
-				},
-				{
-					"id": "open_bag_directly",
-					"title": "拆开档案袋",
-					"desc": "查看里面保存的材料。",
-					"to": "tutorial_0012_a"
-				}
-			],
-			"autosave": true
-		},
-		{
-			"node_id": "tutorial_0012_a",
-			"logical_node_id": "tutorial_0012",
-			"graph_slot_id": "tutorial_0012",
-			"variant_id": "opened_directly",
-			"title": "直接拆开档案袋",
-			"icon_key": "history",
-			"node_type": "调查结果节点",
-			"location": "档案库 / 训练档案",
-			"time_label": "T-00",
-			"characters": ["你"],
-			"current_goal": "使用“回溯”，返回拆开档案袋之前。",
-			"set_case_state": {
-				"bag_opened": true,
-				"seal_state_preserved": false,
-				"seal_evidence_available": false,
-				"current_bag_route": "opened_directly"
-			},
-			"body": [
-				"你捏住封条边缘，将袋口拉开。",
-				"干透的胶层发出短促的撕裂声。封条下方的纸纤维被一并带起，原本留在袋口上的细微痕迹也被新的裂口覆盖。",
-				"直到这时，你才意识到一个问题。",
-				"如果这只档案袋此前曾经被人打开过，那么现在已经很难区分，哪些痕迹来自过去，哪些痕迹是你刚刚留下的。",
-				"你刚刚的调查行为，改变了档案袋原本的状态。",
-				"调查中的选择可能会改变后续能够取得的信息。",
-				"在之后的案件中，你也会经常遇到类似情况。这个时候，“回溯”功能就能让你回到作出选择之前，尝试另一种调查方式。",
-				"点击顶部的“回溯”，回到拆开档案袋之前。"
-			],
-			"audio_clues": [], "text_clues": [], "room_refs": [], "choices": [],
-			"after_reveal_events": [
-				{"type": "tutorial_backtrack_prompt", "delay": 0.4}
-			],
-			"autosave": false
-		},
-		{
-			"node_id": "tutorial_0013",
-			"title": "检查档案袋",
-			"icon_key": "investigation",
-			"node_type": "调查节点",
-			"location": "档案库 / 训练档案",
-			"time_label": "T-00",
-			"characters": ["你"],
-			"current_goal": "记录关键词“胶痕”。",
-			"set_case_state": {"current_bag_route": "inspected_first"},
-			"body": [
-				"你没有立刻碰触封条，而是先把档案袋转向窗边的光线。",
-				"袋口的胶层已经压平，边缘却留着一道不自然的浅色胶痕。它没有顺着纸张纤维延伸，更像是胶面被揭开后，又重新压回去时留下的痕迹。",
-				"这看起来是一个很关键的线索。",
-				"我先把它记录下来。"
-			],
-			"audio_clues": [], "text_clues": [], "room_refs": [], "choices": [],
-			"after_reveal_events": [
-				{
-					"type": "keyword_tutorial",
-					"delay": 0.5,
-					"title": "记录关键词",
-					"body": "调查材料中可能隐藏着能够继续推理的信息。点击正文中带下划线的文字，将“胶痕”记录为关键词。\n\n后续调查中的关键词不会始终被标记出来，需要你根据材料内容自行判断。"
-				}
-			],
-			"autosave": true
-		},
-		{
-			"node_id": "tutorial_0002a",
-			"title": "档案封面",
-			"icon_key": "document",
-			"node_type": "调查节点",
-			"location": "档案库 / 训练档案",
-			"time_label": "T-00",
-			"characters": ["你"],
-			"current_goal": "返回调查枢纽。",
-			"set_flags": {"tutorial_cover_checked": true},
-			"body": [
-				"封面上没有案件名称，只印着一行规整的编号：",
-				"T-00 / 调查流程训练档案",
-				"编号下方还有一行较小的文字：",
-				"档案中的每一项记录，都可能成为推断的一部分。",
-				"除此之外，封面上没有留下日期、署名或经手人的信息。"
-			],
-			"audio_clues": [], "text_clues": [], "room_refs": [],
-			"choices": [
-				{
-					"title": "返回调查枢纽",
-					"desc": "沿此前选择的调查路径继续。",
-					"to": "tutorial_0003"
-				}
-			],
-			"autosave": true
-		},
-		{
-			"node_id": "tutorial_0002b",
-			"title": "拆开档案袋",
-			"icon_key": "document",
-			"node_type": "调查节点",
-			"location": "档案库 / 训练档案",
-			"time_label": "T-00",
-			"characters": ["你"],
-			"current_goal": "返回调查枢纽。",
-			"set_flags": {"tutorial_bag_opened": true},
-			"body": [
-				"你拆开了档案袋。",
-				"从这一刻起，档案袋原本的封口状态已经被改变。回溯可以重看经过的节点，却不能让档案袋恢复到拆封前。",
-				"如果你此前已经检查并记录封口，相关证据仍然保留；如果没有，现在便无法再观察原始封口。"
-			],
-			"audio_clues": [], "text_clues": [], "room_refs": [],
-			"choices": [
-				{
-					"title": "返回调查枢纽",
-					"desc": "沿此前选择的调查路径继续。",
-					"to": "tutorial_0003"
-				}
-			],
-			"autosave": true
-		},
-		{
-			"node_id": "tutorial_0002c",
-			"title": "封口痕迹",
-			"icon_key": "investigation",
-			"node_type": "调查结果节点",
-			"location": "档案库 / 训练档案",
-			"time_label": "T-00",
-			"characters": ["你"],
-			"current_goal": "返回调查枢纽。",
-			"set_flags": {
-				"tutorial_seal_checked": true,
-				"tutorial_seal_evidence_found": true,
-				"tutorial_seal_evidence_lost": false
-			},
-			"body": [
-				"档案袋尚未拆开。封口看似平整，但胶面边缘留下一道极细的白痕。",
-				"白痕沿着原有粘合线分布，说明封口很可能曾被拉开并再次粘合。",
-				"你在改变档案袋状态以前记录下了这条原始封口证据。"
-			],
-			"audio_clues": [], "text_clues": [], "room_refs": [],
-			"choices": [
-				{
-					"title": "返回调查枢纽",
-					"desc": "沿此前选择的调查路径继续。",
-					"to": "tutorial_0003"
-				}
-			],
-			"autosave": true
-		},
-		{
-			"node_id": "tutorial_0002d",
-			"title": "封口状态已改变",
-			"icon_key": "history",
-			"node_type": "调查结果节点",
-			"location": "档案库 / 训练档案",
-			"time_label": "T-00",
-			"characters": ["你"],
-			"current_goal": "返回调查枢纽。",
-			"set_flags": {
-				"tutorial_seal_checked": true,
-				"tutorial_seal_evidence_found": false,
-				"tutorial_seal_evidence_lost": true
-			},
-			"body": [
-				"档案袋已经被你拆开，当前边缘留下的是本次拆封后的状态。",
-				"你无法再分辨哪些痕迹原本就存在，也无法据此复原拆封前的封口。",
-				"原始封口证据已经永久损失；这不会阻止调查继续，但结论必须保留意见。"
-			],
-			"audio_clues": [], "text_clues": [], "room_refs": [],
-			"choices": [
-				{
-					"title": "返回调查枢纽",
-					"desc": "沿此前选择的调查路径继续。",
-					"to": "tutorial_0003"
-				}
-			],
-			"autosave": true
-		},
-		{
-			"node_id": "tutorial_0003",
-			"title": "调查枢纽",
-			"icon_key": "investigation",
-			"node_type": "调查节点",
-			"location": "档案库 / 训练档案",
-			"time_label": "T-00",
-			"characters": ["你"],
-			"current_goal": "选择下一项调查操作；也可以使用回溯重看上一节点。",
-			"body": [
-				"档案袋的封面、封口和袋内材料可以分别检查。",
-				"检查顺序不会造成失败，但拆开档案袋会永久改变原始封口状态。",
-				"封存登记注明：整理结束时袋内共有三页材料，按顺序编号为第一页、第二页和第三页。"
-			],
-			"audio_clues": [], "text_clues": [], "room_refs": [],
-			"choices": [
-				{
-					"title": "查看档案封面",
-					"desc": "先确认档案的编号与基本信息。",
-					"to": "tutorial_0002a",
-					"requires_flags": {"tutorial_cover_checked": false}
-				},
-				{
-					"title": "检查档案袋外观",
-					"desc": "从档案袋外部开始检查。",
-					"to": "tutorial_0002c",
-					"requires_flags": {"tutorial_bag_opened": false, "tutorial_seal_checked": false}
-				},
-				{
-					"title": "检查档案袋外观",
-					"desc": "从档案袋外部开始检查。",
-					"to": "tutorial_0002d",
-					"requires_flags": {"tutorial_bag_opened": true, "tutorial_seal_checked": false}
-				},
-				{
-					"title": "打开档案袋",
-					"desc": "查看袋内保存的材料。",
-					"to": "tutorial_0002b",
-					"requires_flags": {"tutorial_bag_opened": false}
-				},
-				{
-					"title": "查看封存登记",
-					"desc": "阅读档案入库时留下的记录。",
-					"to": "tutorial_0005",
-					"requires_flags": {"tutorial_bag_opened": true}
-				}
-			],
-			"autosave": true
-		},
-		{
-			"node_id": "tutorial_0004",
-			"title": "查看来路",
-			"icon_key": "history",
-			"node_type": "兼容节点",
-			"location": "档案库 / 训练档案",
-			"time_label": "T-00",
-			"characters": ["你"],
-			"current_goal": "返回调查枢纽。",
-			"body": ["此节点仅为旧存档兼容保留，新的调查流程不会进入这里。"],
-			"audio_clues": [], "text_clues": [], "room_refs": [],
-			"choices": [{"title": "返回调查枢纽", "desc": "继续当前调查。", "to": "tutorial_0003"}],
-			"autosave": true
-		},
-		{
-			"node_id": "tutorial_0005",
-			"title": "封存登记",
-			"icon_key": "document",
-			"node_type": "证据节点",
-			"location": "档案库 / 封存登记",
-			"time_label": "封存时",
-			"characters": ["你"],
-			"current_goal": "阅读封存登记。",
-			"set_flags": {"tutorial_archive_record_checked": true},
-			"body": [
-				"封存登记的字迹清楚，没有修改痕迹。",
-				"登记内容注明：档案袋内共有三页材料，编号连续，封口完成后由库房接收。",
-				"接收栏中还记录着一项状态：",
-				"封口完整，未见破损。"
-			],
-			"audio_clues": [], "text_clues": ["clue_tutorial_seal_record"], "room_refs": [],
-			"choices": [
-				{
-					"title": "检查袋内材料",
-					"desc": "将登记数量与档案袋内的当前材料进行比较。",
-					"to": "tutorial_0006"
-				}
-			],
-			"autosave": true
-		},
-		{
-			"node_id": "tutorial_0006",
-			"title": "袋内材料",
-			"icon_key": "investigation",
-			"node_type": "调查节点",
-			"location": "档案库 / 当前档案",
-			"time_label": "复核时",
-			"characters": ["你"],
-			"current_goal": "提取关键词“页码缺口”。",
-			"set_flags": {"tutorial_file_contents_checked": true, "tutorial_page_gap_found": true},
-			"body": [
-				"档案袋内只剩两张纸。",
-				"第一页右下角标着“1 / 3”，另一张标着“3 / 3”。两张纸之间没有夹页，也没有装订脱落留下的碎屑。",
-				"现存第一页和第三页之间形成了清楚的页码缺口，与封存登记中的“三页材料”不一致。"
-			],
-			"graph_targets": ["tutorial_inference_file_change"],
-			"audio_clues": [], "text_clues": ["clue_tutorial_page_gap"], "room_refs": [],
-			"choices": [],
-			"autosave": true
-		},
-		{
-			"node_id": "tutorial_inference_file_change",
-			"title": "文件数量发生变化",
-			"icon_key": "deduction",
-			"node_type": "推断目标",
-			"location": "训练推断",
-			"time_label": "T-00",
-			"characters": ["你"],
-			"graph_only": true,
-			"body": ["档案当前只剩第一页和第三页，文件数量与封存登记不一致。"],
-			"audio_clues": [], "text_clues": [], "room_refs": [], "choices": [],
-			"autosave": false
-		},
-		{
-			"node_id": "tutorial_0007",
-			"title": "推理复核",
-			"icon_key": "investigation",
-			"node_type": "调查节点",
-			"location": "档案库 / 当前档案",
-			"time_label": "复核时",
-			"characters": ["你"],
-			"current_goal": "检验无效连接和无法确认的责任归属。",
-			"body": [
-				"档案封面仍印着T-00编号，但编号只能识别档案，不能证明文件数量发生变化。",
-				"你还需要辨别：证据能够支持客观状态，却不能在没有人员记录时指向具体责任人。"
-			],
-			"graph_targets": ["tutorial_inference_file_change", "tutorial_hypothesis_admin"],
-			"audio_clues": [], "text_clues": ["clue_tutorial_archive_id"], "room_refs": [],
-			"choices": [
-				{
-					"title": "补充复核材料",
-					"desc": "继续检查尚未纳入结论的材料。",
-					"to": "tutorial_0007s",
-					"requires_flags": {
-						"tutorial_page_connection_completed": true,
-						"tutorial_invalid_connection_seen": true,
-						"tutorial_returned_safe": true,
-						"tutorial_seal_evidence_found": true,
-						"tutorial_seal_connection_completed": false
-					}
-				},
-				{
-					"title": "形成完整复核结论",
-					"desc": "整理已经建立的永久连接并形成结论。",
-					"to": "tutorial_0009a",
-					"requires_flags": {
-						"tutorial_page_connection_completed": true,
-						"tutorial_invalid_connection_seen": true,
-						"tutorial_returned_safe": true,
-						"tutorial_seal_connection_completed": true
-					}
-				},
-				{
-					"title": "形成保留意见结论",
-					"desc": "根据当前已核实内容形成结论。",
-					"to": "tutorial_0009b",
-					"requires_flags": {
-						"tutorial_page_connection_completed": true,
-						"tutorial_invalid_connection_seen": true,
-						"tutorial_returned_safe": true,
-						"tutorial_seal_connection_completed": false
-					}
-				}
-			],
-			"autosave": true
-		},
-		{
-			"node_id": "tutorial_0007s",
-			"title": "封口异常复核",
-			"icon_key": "investigation",
-			"node_type": "可选调查节点",
-			"location": "档案库 / 当前档案",
-			"time_label": "复核时",
-			"characters": ["你"],
-			"current_goal": "提取关键词“封口白痕”并连接到“封口状态异常”。",
-			"body": [
-				"你调出拆开档案袋以前留下的记录。胶面边缘存在一道沿原粘合线分布的封口白痕。",
-				"这条原始记录能够支持“封口状态异常”，但不能确认由谁处理过档案袋。"
-			],
-			"graph_targets": ["tutorial_inference_seal", "tutorial_hypothesis_admin", "tutorial_0007"],
-			"audio_clues": [], "text_clues": ["clue_tutorial_seal_mark"], "room_refs": [],
-			"choices": [],
-			"autosave": true
-		},
-		{
-			"node_id": "tutorial_inference_seal",
-			"title": "封口状态异常",
-			"icon_key": "deduction",
-			"node_type": "推断目标",
-			"location": "训练推断",
-			"time_label": "T-00",
-			"characters": ["你"],
-			"graph_only": true,
-			"body": ["拆封前记录的白痕说明原始封口很可能经过再次粘合。"],
-			"audio_clues": [], "text_clues": [], "room_refs": [], "choices": [],
-			"autosave": false
-		},
-		{
-			"node_id": "tutorial_hypothesis_admin",
-			"title": "档案管理员取走第二页",
-			"icon_key": "false",
-			"node_type": "错误假设节点",
-			"location": "训练推断",
-			"time_label": "T-00",
-			"characters": ["你"],
-			"graph_only": true,
-			"body": ["现有记录不足以确认由哪一个人取走了缺失文件。"],
-			"audio_clues": [], "text_clues": [], "room_refs": [], "choices": [],
-			"autosave": false
-		},
-		{
-			"node_id": "tutorial_0008e",
-			"title": "无法确认的责任人",
-			"icon_key": "false",
-			"node_type": "错误推断",
-			"location": "训练推断",
-			"time_label": "T-00",
-			"characters": ["你"],
-			"current_goal": "返回最近的安全节点。",
-			"body": [
-				"页码缺口能够证明当前文件数量与封存登记不一致；封口白痕若被保留，也只能说明原始封口很可能经过再次处理。",
-				"这些证据都不能说明是谁打开档案、是谁取走第二页，或管理员应对此负责。",
-				"错误推断不会让训练失败。返回最近的安全节点后，已经建立的正确连接和调查状态都会保留。"
-			],
-			"audio_clues": [], "text_clues": [], "room_refs": [],
-			"choices": [
-				{
-					"title": "返回最近的安全节点",
-					"desc": "保留调查状态，返回进入错误推断前的最近安全节点。",
-					"action": "load_last_safe_autosave"
-				}
-			],
-			"autosave": false
-		},
-		{
-			"node_id": "tutorial_inference_final",
-			"title": "档案内容在封存后发生变化",
-			"icon_key": "deduction",
-			"node_type": "兼容推断节点",
-			"location": "训练推断",
-			"time_label": "T-00",
-			"characters": ["你"],
-			"graph_only": true,
-			"body": ["此节点仅为旧存档兼容保留，新的调查流程使用差异化结论。"],
-			"audio_clues": [], "text_clues": [], "room_refs": [], "choices": [],
-			"autosave": false
-		},
-		{
-			"node_id": "tutorial_0009",
-			"title": "复核结果",
-			"icon_key": "deduction",
-			"node_type": "兼容结论节点",
-			"location": "训练推断",
-			"time_label": "T-00",
-			"characters": ["你"],
-			"current_goal": "查看当前训练结果。",
-			"body": ["此节点仅为旧存档兼容保留，新的调查流程不会进入这里。"],
-			"audio_clues": [], "text_clues": [], "room_refs": [],
-			"choices": [{"title": "查看训练结果", "desc": "继续完成训练。", "to": "tutorial_0010"}],
-			"autosave": true
-		},
-		{
-			"node_id": "tutorial_0009a",
-			"title": "完整复核结论",
-			"icon_key": "deduction",
-			"node_type": "结论节点",
-			"location": "训练推断",
-			"time_label": "T-00",
-			"characters": ["你"],
-			"current_goal": "完成训练。",
-			"set_flags": {
-				"tutorial_result_complete_review": true,
-				"tutorial_result_reserved_opinion": false
-			},
-			"body": [
-				"封存登记记载袋内共有三页材料；当前只剩第一页和第三页，文件数量与登记不一致。",
-				"拆封前记录的白痕说明原始封口经过再次处理。",
-				"两项证据合并后，可以判断档案内容很可能在完成封口以后发生了变化。",
-				"现有证据仍不能确认责任人、第二页由谁取走、缺失页内容或处理动机。"
-			],
-			"audio_clues": [], "text_clues": [], "room_refs": [],
-			"choices": [{"title": "查看训练结果", "desc": "确认完整复核结论并完成训练。", "to": "tutorial_0010"}],
-			"autosave": true
-		},
-		{
-			"node_id": "tutorial_0009b",
-			"title": "保留意见结论",
-			"icon_key": "deduction",
-			"node_type": "结论节点",
-			"location": "训练推断",
-			"time_label": "T-00",
-			"characters": ["你"],
-			"current_goal": "完成训练。",
-			"set_flags": {
-				"tutorial_result_complete_review": false,
-				"tutorial_result_reserved_opinion": true
-			},
-			"body": [
-				"当前档案袋内只剩第一页和第三页，文件数量与封存登记不一致，第二页目前缺失。",
-				"由于没有保留可核实的原始封口证据，现阶段无法确认第二页是在封口前还是封口后缺失。",
-				"同样无法确认档案袋是否曾被重新打开，也不能排除封存登记本身存在记录误差。"
-			],
-			"audio_clues": [], "text_clues": [], "room_refs": [],
-			"choices": [{"title": "查看训练结果", "desc": "确认保留意见结论并完成训练。", "to": "tutorial_0010"}],
-			"autosave": true
-		},
-		{
-			"node_id": "tutorial_0010",
-			"title": "训练完成",
-			"icon_key": "archive",
-			"node_type": "教程完成节点",
-			"location": "档案库",
-			"time_label": "T-00",
-			"characters": ["你"],
-			"current_goal": "返回档案库。",
-			"set_flags": {"tutorial_completed": true},
-			"body": [
-				"阅读剧情节点\n选择调查方向\n使用回溯查看路径\n提取正文关键词\n查看关键词简介\n打开调查图谱\n选择关键词节点\n建立正确连接\n识别连接无效\n进入错误推断\n返回安全节点\n独立完成最终连接"
-			],
-			"audio_clues": [], "text_clues": [], "room_refs": [],
-			"choices": [
-				{
-					"title": "返回档案库",
-					"desc": "结束 T-00 训练，查看已经开放的正式案件。",
-					"action": "return_to_archive"
-				}
-			],
-			"autosave": true
-		}
-	]
+  "case_id": "tutorial_00_archive_training",
+  "chapter_title": "归档异常",
+  "chapter_intro": "档案系统在例行复核中发现，TH-0731 的登记内容与现存材料可能不一致。重新检查档案袋的封存状态、归档清单与袋内材料，并向艾琳汇报能够被证据支持的结论。",
+  "current_goal": "接听艾琳的电话。",
+  "discovered_keywords": [],
+  "initial_node_id": "tutorial_0000",
+  "node_aliases": {
+    "tutorial_0012_a": "tutorial_0011",
+    "tutorial_0013": "tutorial_0012",
+    "tutorial_0002a": "tutorial_0014",
+    "tutorial_0002b": "tutorial_0014",
+    "tutorial_0002c": "tutorial_0014",
+    "tutorial_0002d": "tutorial_0014",
+    "tutorial_0003": "tutorial_0014",
+    "tutorial_0004": "tutorial_0014",
+    "tutorial_0005": "tutorial_0014",
+    "tutorial_0006": "tutorial_0014",
+    "tutorial_0007": "tutorial_0014",
+    "tutorial_0007s": "tutorial_0014",
+    "tutorial_0008e": "tutorial_0014",
+    "tutorial_0009": "tutorial_0014",
+    "tutorial_0009a": "tutorial_0014",
+    "tutorial_0009b": "tutorial_0014",
+    "tutorial_0010": "tutorial_0017",
+    "tutorial_inference_file_change": "tutorial_0014",
+    "tutorial_inference_seal": "tutorial_0014",
+    "tutorial_hypothesis_admin": "tutorial_0014",
+    "tutorial_inference_final": "tutorial_0014"
+  },
+  "nodes": [
+    {
+      "node_id": "tutorial_0000",
+      "title": "午后之扰",
+      "icon_key": "archive",
+      "node_type": "剧情节点",
+      "location": "档案室 / 调阅终端",
+      "time_label": "T-00",
+      "characters": ["你"],
+      "current_goal": "接听艾琳的电话。",
+      "body": [
+        "午后的办公室安静得只剩空气净化器的低鸣。",
+        "阳光越过百叶窗，在堆满文件的桌面上切出几道倾斜的亮痕。你伏在桌边睡着了，一只手还压在尚未整理完的材料上。",
+        "电话铃声响起时，你花了几秒钟，才重新辨认出自己所在的地方。",
+        "来电显示上跳动着一个熟悉的名字：艾琳。"
+      ],
+      "audio_clues": [],
+      "text_clues": [],
+      "room_refs": [],
+      "choices": [],
+      "text_reveal": {"mode": "first_visit", "post_delay": 0.8},
+      "after_reveal_events": [
+        {"type": "incoming_call", "call_id": "tutorial_assistant_opening", "delay": 0.8}
+      ],
+      "autosave": true
+    },
+    {
+      "node_id": "tutorial_0001",
+      "title": "第一次接触",
+      "icon_key": "investigation",
+      "node_type": "调查节点",
+      "location": "档案室 / TH-0731",
+      "time_label": "T-00",
+      "characters": ["你"],
+      "current_goal": "检查桌上的 TH-0731 档案袋。",
+      "set_case_state": {
+        "bag_opened": false,
+        "seal_state_preserved": true,
+        "bag_inspected": false,
+        "archive_contents_checked": false,
+        "current_bag_route": ""
+      },
+      "body": [
+        "一个陈旧的棕色档案袋静静躺在桌面中央。",
+        "封面上印着已经有些褪色的编号：TH-0731。袋口用一根白色棉线缠绕在圆形纸板扣上，这是档案室常见的封存方式。",
+        "刚从午睡中醒来，思路还没有完全恢复。你下意识地把注意力放在了袋内材料上。"
+      ],
+      "state_variants": [
+        {
+          "requires_flags": {"inspect_bag_option_unlocked": true},
+          "current_goal": "重新调查 TH-0731 档案袋。",
+          "append_sections": [
+            {
+              "id": "tutorial_backtrack_reassurance",
+              "text": "你所作出的选择都会影响之后的调查流程。\n\n但这并不意味着你必须害怕尝试。发现问题、回到关键节点，再验证另一种可能，本身也是调查的一部分。",
+              "reveal": "first_time",
+              "post_delay": 0.4,
+              "after_reveal_events": [
+                {
+                  "type": "reveal_choice_attention",
+                  "choice_id": "inspect_bag_before_opening",
+                  "attention_event_id": "tutorial_attention_inspect_bag"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "audio_clues": [],
+      "text_clues": [],
+      "room_refs": [],
+      "choices": [
+        {
+          "id": "inspect_bag_before_opening",
+          "title": "仔细观察档案袋外观",
+          "desc": "在打开之前观察档案袋的封存状态。",
+          "to": "tutorial_0012",
+          "requires_flags": {
+            "inspect_bag_option_unlocked": true,
+            "tutorial_inspect_bag_choice_visible": true
+          }
+        },
+        {
+          "id": "open_bag_directly",
+          "title": "直接拆开档案袋",
+          "desc": "查看里面保存的材料。",
+          "to": "tutorial_0011"
+        }
+      ],
+      "autosave": true
+    },
+    {
+      "node_id": "tutorial_0011",
+      "title": "被改变的状态",
+      "icon_key": "history",
+      "node_type": "调查结果节点",
+      "location": "档案室 / TH-0731",
+      "time_label": "T-00",
+      "characters": ["你"],
+      "current_goal": "使用回溯，返回拆封之前。",
+      "set_case_state": {
+        "bag_opened": true,
+        "seal_state_preserved": false,
+        "bag_inspected": false,
+        "current_bag_route": "opened_directly"
+      },
+      "body": [
+        "你解开缠绕在纸板扣上的棉线，将袋口拉开。",
+        "纸板转动时，边缘积下的灰尘被手指擦散。棉线从原本的压痕中脱离，在纸面上留下了一道新的摩擦痕迹。",
+        "直到这时，你才意识到一个问题。",
+        "如果档案袋在此之前已经被人打开过，那么现在已经很难区分，哪些痕迹来自过去，哪些痕迹是你刚刚造成的。",
+        "你刚才的调查行为，改变了档案袋原本的状态。"
+      ],
+      "quote": "调查行为可能改变后续能够取得的信息。使用“回溯”，回到拆开档案袋之前。",
+      "audio_clues": [],
+      "text_clues": [],
+      "room_refs": [],
+      "choices": [],
+      "after_reveal_events": [
+        {
+          "type": "tutorial_backtrack_prompt",
+          "delay": 0.4,
+          "attention_event_id": "tutorial_attention_backtrack"
+        }
+      ],
+      "autosave": false
+    },
+    {
+      "node_id": "tutorial_0012",
+      "title": "观察的艺术",
+      "icon_key": "investigation",
+      "node_type": "调查节点",
+      "location": "档案室 / TH-0731",
+      "time_label": "T-00",
+      "characters": ["你"],
+      "current_goal": "仔细检查档案袋的封存状态。",
+      "set_case_state": {"bag_inspected": true, "current_bag_route": "inspected_first"},
+      "body": [
+        "你没有急着动手，而是把档案袋转向窗边的光线。",
+        "档案袋本体已经明显泛黄，封面边缘也因长时间存放而变得粗糙。缠绕在纸板扣上的棉线却显得新得多。",
+        "在线头末端，只有很短的一截留下了轻微的褪色。其余部分的颜色，与档案袋本体的老化程度并不一致。",
+        "这看起来是一个值得记录的细节。"
+      ],
+      "graph_targets": [
+        "tutorial_fact_thread_age_mismatch",
+        "tutorial_hypothesis_archive_date",
+        "tutorial_hypothesis_malicious_damage"
+      ],
+      "state_variants": [
+        {
+          "requires_flags": {
+            "tutorial_thread_fade_hint_visible": true,
+            "tutorial_thread_fade_recorded": false
+          },
+          "quote": "点击下划线标识的文字提取关键词。"
+        },
+        {
+          "requires_flags": {"tutorial_thread_fade_recorded": true},
+          "current_goal": "阅读新增记录。",
+          "append_sections": [
+            {
+              "id": "tutorial_after_thread_fade",
+              "text": "“线头褪色”已经被记录下来。\n\n但一个孤立的信息点还不能形成结论。你需要进入图谱，确认这条信息究竟能够直接支持什么判断。",
+              "reveal": "first_time",
+              "post_delay": 0.4,
+              "after_reveal_events": [
+                {
+                  "type": "start_graph_attention",
+                  "attention_event_id": "tutorial_attention_graph_first"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "audio_clues": [],
+      "text_clues": ["clue_tutorial_thread_fade"],
+      "room_refs": [],
+      "choices": [],
+      "after_reveal_events": [
+        {
+          "type": "show_keyword_inline_hint",
+          "hint_visible_flag": "tutorial_thread_fade_hint_visible",
+          "recorded_flag": "tutorial_thread_fade_recorded",
+          "delay": 0.5
+        }
+      ],
+      "autosave": true
+    },
+    {
+      "node_id": "tutorial_0014",
+      "title": "档案之内",
+      "icon_key": "document",
+      "node_type": "调查节点",
+      "location": "档案室 / TH-0731",
+      "time_label": "T-00",
+      "characters": ["你"],
+      "current_goal": "拆开档案袋，核对袋内材料。",
+      "body": [
+        "你已经记录了档案袋打开前的封存状态。",
+        "接下来即使拆开档案袋，原本观察到的异常也已经留在调查记录中。",
+        "现在可以核对袋内材料了。"
+      ],
+      "audio_clues": [],
+      "text_clues": [],
+      "room_refs": [],
+      "choices": [
+        {
+          "id": "open_bag_after_observation",
+          "title": "拆开档案袋",
+          "desc": "在保留封存状态记录的前提下打开档案袋。",
+          "to": "tutorial_0015"
+        }
+      ],
+      "autosave": true
+    },
+    {
+      "node_id": "tutorial_0015",
+      "title": "清单与实物",
+      "icon_key": "document",
+      "node_type": "证据节点",
+      "location": "档案室 / TH-0731",
+      "time_label": "T-00",
+      "characters": ["你"],
+      "current_goal": "核对归档清单与袋内实际材料。",
+      "set_flags": {"tutorial_bag_opened_after_observation": true},
+      "set_case_state": {
+        "bag_opened": true,
+        "seal_state_preserved": true,
+        "archive_contents_checked": true
+      },
+      "body": [
+        "你重新解开棉线，打开档案袋。",
+        "这次操作仍然改变了袋口当前的状态，但打开前的异常已经被记录，不会因为新的痕迹而彻底丢失。",
+        "你将归档清单和袋内材料依次放到桌面上。",
+        "清单中登记了三项内容：\n\nTH-0731 证物袋，一份。\nTH-0731 现场照片组 A，六张。\nTH-0731 证人陈述记录，一份。",
+        "桌面上的证物袋存在，标签与清单一致。现场照片共六张，编号和数量也没有问题。",
+        "但清单中登记的“证人陈述记录”，并不在档案袋内。",
+        "这一次，系统不会替你标出需要记录的词语。"
+      ],
+      "quote": "自行记录能够说明材料异常的关键词。",
+      "graph_targets": ["tutorial_fact_material_mismatch"],
+      "state_variants": [
+        {
+          "requires_flags": {"tutorial_witness_statement_missing_recorded": true},
+          "current_goal": "阅读新增记录。",
+          "append_sections": [
+            {
+              "id": "tutorial_after_missing_statement",
+              "text": "现在已经确认了两项异常：档案袋的封口状态存在问题，归档清单中的一份材料目前也不在袋内。\n\n进入图谱，分别确认这些信息能够支持哪些事实，并判断最终结论应当停留在什么范围。",
+              "reveal": "first_time",
+              "post_delay": 0.4,
+              "after_reveal_events": [
+                {
+                  "type": "start_graph_attention",
+                  "attention_event_id": "tutorial_attention_graph_final"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "audio_clues": [],
+      "text_clues": ["clue_tutorial_witness_statement_missing"],
+      "room_refs": [],
+      "choices": [],
+      "autosave": true
+    },
+    {
+      "node_id": "tutorial_0016",
+      "title": "准备汇报",
+      "icon_key": "phone",
+      "node_type": "剧情节点",
+      "location": "档案室 / 调阅终端",
+      "time_label": "T-00",
+      "characters": ["你"],
+      "current_goal": "打开电话簿，联系艾琳。",
+      "set_flags": {"tutorial_report_ready": true},
+      "body": [
+        "复核已经完成。",
+        "你确认了 TH-0731 的封口状态异常，也确认了归档清单中的证人陈述记录目前不在袋内。",
+        "两项异常之间是否存在直接因果，仍然无法确认。",
+        "现在需要主动联系艾琳，汇报调查结果。"
+      ],
+      "quote": "打开电话簿，拨打艾琳的电话。",
+      "audio_clues": [],
+      "text_clues": [],
+      "room_refs": [],
+      "choices": [],
+      "after_reveal_events": [
+        {
+          "type": "start_phonebook_attention",
+          "attention_event_id": "tutorial_attention_phonebook"
+        }
+      ],
+      "autosave": true
+    },
+    {
+      "node_id": "tutorial_0017",
+      "title": "归档异常",
+      "icon_key": "archive",
+      "node_type": "教程完成节点",
+      "location": "档案室",
+      "time_label": "T-00",
+      "characters": ["你"],
+      "current_goal": "结束复核。",
+      "body": [
+        "办公室重新安静下来。",
+        "你将材料整理好，在复核记录末尾写下最终结论。桌面仍然有些杂乱，但证据之间的边界已经比刚醒来时清楚得多。",
+        "你不必亲临每一个现场。档案、电话、录音和关系图谱，会将调查所需的信息送到这张桌前。",
+        "接下来，你需要自己决定观察顺序、记录信息、建立关联，并只提交能够被证据支持的结论。",
+        "阅读材料并选择调查行动\n从正文和通话中记录关键词\n在图谱中验证信息之间的关系\n通过电话联系他人并汇报结论"
+      ],
+      "audio_clues": [],
+      "text_clues": [],
+      "room_refs": [],
+      "choices": [
+        {
+          "id": "finish_tutorial_review",
+          "title": "结束复核",
+          "desc": "完成 T-00 并返回案件选择界面。",
+          "action": "return_to_archive",
+          "set_flags": {"tutorial_completed": true}
+        }
+      ],
+      "autosave": true
+    },
+    {
+      "node_id": "tutorial_fact_thread_age_mismatch",
+      "title": "封口棉线与档案袋的老化状态不一致",
+      "icon_key": "deduction",
+      "node_type": "候选判断",
+      "location": "TH-0731 / 封口复核",
+      "time_label": "T-00",
+      "characters": ["你"],
+      "graph_only": true,
+      "body": ["棉线的褪色程度明显低于档案袋本体。"],
+      "audio_clues": [], "text_clues": [], "room_refs": [], "choices": [], "autosave": false
+    },
+    {
+      "node_id": "tutorial_hypothesis_archive_date",
+      "title": "档案袋的归档日期存在错误",
+      "icon_key": "false",
+      "node_type": "无效判断",
+      "location": "TH-0731 / 封口复核",
+      "time_label": "T-00",
+      "characters": ["你"],
+      "graph_only": true,
+      "body": ["棉线状态不能单独推翻归档日期。"],
+      "audio_clues": [], "text_clues": [], "room_refs": [], "choices": [], "autosave": false
+    },
+    {
+      "node_id": "tutorial_hypothesis_malicious_damage",
+      "title": "档案袋曾被某人恶意破坏",
+      "icon_key": "false",
+      "node_type": "过度推断",
+      "location": "TH-0731 / 封口复核",
+      "time_label": "T-00",
+      "characters": ["你"],
+      "graph_only": true,
+      "body": ["封口材料异常不能证明主观恶意。"],
+      "audio_clues": [], "text_clues": [], "room_refs": [], "choices": [], "autosave": false
+    },
+    {
+      "node_id": "tutorial_fact_seal_anomaly",
+      "title": "封口状态异常",
+      "icon_key": "deduction",
+      "node_type": "事实判断",
+      "location": "TH-0731 / 复核事实",
+      "time_label": "T-00",
+      "characters": ["你"],
+      "graph_only": true,
+      "body": ["封口棉线与档案袋本体的老化状态不一致。"],
+      "audio_clues": [], "text_clues": [], "room_refs": [], "choices": [], "autosave": false
+    },
+    {
+      "node_id": "tutorial_fact_material_mismatch",
+      "title": "现存材料与归档清单不一致",
+      "icon_key": "deduction",
+      "node_type": "事实判断",
+      "location": "TH-0731 / 复核事实",
+      "time_label": "T-00",
+      "characters": ["你"],
+      "graph_only": true,
+      "body": ["清单登记的证人陈述记录目前不在档案袋内。"],
+      "audio_clues": [], "text_clues": [], "room_refs": [], "choices": [], "autosave": false
+    },
+    {
+      "node_id": "tutorial_conclusion_supported",
+      "title": "TH-0731 同时存在封口异常和材料缺失",
+      "icon_key": "deduction",
+      "node_type": "最终候选结论",
+      "location": "TH-0731 / 最终判断",
+      "time_label": "T-00",
+      "characters": ["你"],
+      "graph_only": true,
+      "graph_conclusion": {
+        "outcome": "correct",
+        "requires_flags": {
+          "tutorial_first_graph_relation_completed": true,
+          "tutorial_second_graph_relation_completed": true
+        },
+        "set_flags": {"tutorial_final_graph_completed": true},
+        "required_fact_node_ids": ["tutorial_fact_seal_anomaly", "tutorial_fact_material_mismatch"],
+        "next_node_id": "tutorial_0016",
+        "feedback": "结论成立。目前能够确认的是，TH-0731 的封口状态存在异常，现存材料与归档清单也不一致。\n\n两项异常可能有关，但现有证据不足以确认它们是否发生于同一次行为，也不足以确认发生时间、具体原因和责任人。"
+      },
+      "body": ["两项事实共同支持一项严格限定证据边界的结论。"],
+      "audio_clues": [], "text_clues": [], "room_refs": [], "choices": [], "autosave": false
+    },
+    {
+      "node_id": "tutorial_conclusion_causal",
+      "title": "证人陈述记录一定是在档案袋被打开时取走的",
+      "icon_key": "false",
+      "node_type": "过度因果结论",
+      "location": "TH-0731 / 最终判断",
+      "time_label": "T-00",
+      "characters": ["你"],
+      "graph_only": true,
+      "graph_conclusion": {
+        "outcome": "invalid",
+        "feedback": "这个结论把两个已经确认的事实，直接组成了一条尚未被证明的因果关系。\n\n封口状态异常已经成立。材料缺失也已经成立。\n\n但现有证据不能证明，证人陈述记录就是在造成封口异常的那次行为中被取走的。"
+      },
+      "body": ["两项异常不能自动组成直接因果关系。"],
+      "audio_clues": [], "text_clues": [], "room_refs": [], "choices": [], "autosave": false
+    },
+    {
+      "node_id": "tutorial_conclusion_erin",
+      "title": "艾琳打开了档案袋并取走了证人陈述记录",
+      "icon_key": "false",
+      "node_type": "责任人指控",
+      "location": "TH-0731 / 最终判断",
+      "time_label": "T-00",
+      "characters": ["你"],
+      "graph_only": true,
+      "graph_conclusion": {
+        "outcome": "invalid",
+        "feedback": "现有证据没有将艾琳与封口异常或材料缺失联系起来。\n\n她向你分配了复核任务，不等于她实施了异常行为。人物身份和接触可能性不能替代直接证据。"
+      },
+      "body": ["人物身份和接触可能性不能替代直接证据。"],
+      "audio_clues": [], "text_clues": [], "room_refs": [], "choices": [], "autosave": false
+    }
+  ]
 }

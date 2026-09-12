@@ -1,7 +1,7 @@
 extends RefCounted
 class_name CaseRuntimeState
 
-const MAX_KEYWORD_LENGTH: int = 10
+const MAX_KEYWORD_LENGTH: int = 24
 
 var current_node_id: String = ""
 var unlocked_nodes: Dictionary = {}
@@ -17,11 +17,26 @@ var graph_view: Dictionary = {"pan_x": 0.0, "pan_y": 0.0, "zoom": 1.0}
 var discovered_contacts: Array[String] = ["assistant"]
 var active_call: Dictionary = {}
 var revealed_node_ids: Array[String] = []
+var revealed_section_ids: Array[String] = []
 var active_text_reveal: Dictionary = {}
 var completed_after_reveal_events: Array[String] = []
+var tutorial_attention_audio_counts: Dictionary = {}
 var case_state: Dictionary = {}
 var history_snapshots: Array[Dictionary] = []
 var active_transition_indices: Array[int] = []
+# Optional investigation-time capability. Legacy cases keep investigation_time
+# at -1 and never consult these fields.
+var investigation_time: int = -1
+var assistant_state: Dictionary = {}
+var police_state: Dictionary = {}
+var active_actions: Array[Dictionary] = []
+var completed_actions: Array[String] = []
+var action_history: Array[Dictionary] = []
+var event_flags: Dictionary = {}
+var pollution_node_states: Dictionary = {}
+var witness_protected: bool = false
+var killer_alerted: bool = false
+var killer_controlled: bool = false
 
 const NON_REWINDABLE_FLAG_IDS := {
 	"tutorial_assistant_call_completed": true,
@@ -31,7 +46,20 @@ const NON_REWINDABLE_FLAG_IDS := {
 	"tutorial_keyword_popup_shown": true,
 	"tutorial_keyword_popup_open": true,
 	"tutorial_keyword_recording_learned": true,
-	"tutorial_glue_mark_recorded": true
+	"tutorial_glue_mark_recorded": true,
+	"tutorial_inspect_bag_choice_visible": true,
+	"tutorial_glue_keyword_hint_visible": true,
+	"tutorial_graph_attention_ready": true,
+	"tutorial_graph_attention_completed": true,
+	"tutorial_thread_fade_hint_visible": true,
+	"tutorial_attention_graph_first_ready": true,
+	"tutorial_attention_graph_first_completed": true,
+	"tutorial_attention_graph_final_ready": true,
+	"tutorial_attention_graph_final_completed": true,
+	"tutorial_attention_phonebook_ready": true,
+	"tutorial_attention_phonebook_completed": true,
+	"tutorial_attention_call_erin_ready": true,
+	"tutorial_attention_call_erin_completed": true
 }
 
 var _keyword_instances_by_key: Dictionary = {}
@@ -458,11 +486,24 @@ func to_save_dictionary() -> Dictionary:
 		"discovered_contacts": discovered_contacts.duplicate(),
 		"active_call": active_call.duplicate(true),
 		"revealed_node_ids": revealed_node_ids.duplicate(),
+		"revealed_section_ids": revealed_section_ids.duplicate(),
 		"active_text_reveal": active_text_reveal.duplicate(true),
 		"completed_after_reveal_events": completed_after_reveal_events.duplicate(),
+		"tutorial_attention_audio_counts": tutorial_attention_audio_counts.duplicate(true),
 		"case_state": case_state.duplicate(true),
 		"history_snapshots": history_snapshots.duplicate(true),
-		"active_transition_indices": active_transition_indices.duplicate()
+		"active_transition_indices": active_transition_indices.duplicate(),
+		"investigation_time": investigation_time,
+		"assistant_state": assistant_state.duplicate(true),
+		"police_state": police_state.duplicate(true),
+		"active_actions": active_actions.duplicate(true),
+		"completed_actions": completed_actions.duplicate(),
+		"action_history": action_history.duplicate(true),
+		"event_flags": event_flags.duplicate(true),
+		"pollution_node_states": pollution_node_states.duplicate(true),
+		"witness_protected": witness_protected,
+		"killer_alerted": killer_alerted,
+		"killer_controlled": killer_controlled
 	}
 
 
@@ -476,6 +517,26 @@ func set_case_state_values(values: Dictionary) -> void:
 		var key := str(key_value)
 		if key != "":
 			case_state[key] = values[key_value]
+
+
+func enable_investigation_time(start_time: int) -> void:
+	if investigation_time < 0:
+		investigation_time = start_time
+	if assistant_state.is_empty():
+		assistant_state = _idle_actor_state("assistant")
+	if police_state.is_empty():
+		police_state = _idle_actor_state("police")
+
+
+func _idle_actor_state(actor_id: String) -> Dictionary:
+	return {
+		"actor_id": actor_id,
+		"status": "idle",
+		"current_action": "",
+		"start_time": -1,
+		"complete_time": -1,
+		"remaining_time": 0
+	}
 
 
 func _make_rewind_snapshot() -> Dictionary:
@@ -568,6 +629,28 @@ func mark_node_revealed(node_id: String) -> bool:
 
 func is_node_revealed(node_id: String) -> bool:
 	return revealed_node_ids.has(node_id)
+
+
+func mark_section_revealed(section_id: String) -> bool:
+	if section_id == "" or revealed_section_ids.has(section_id):
+		return false
+	revealed_section_ids.append(section_id)
+	return true
+
+
+func is_section_revealed(section_id: String) -> bool:
+	return revealed_section_ids.has(section_id)
+
+
+func get_attention_audio_count(event_id: String) -> int:
+	return 1 if int(tutorial_attention_audio_counts.get(event_id, 0)) >= 1 else 0
+
+
+func record_attention_audio_peak(event_id: String) -> int:
+	if event_id == "":
+		return 0
+	tutorial_attention_audio_counts[event_id] = 1
+	return 1
 
 
 func mark_after_reveal_event_completed(event_id: String) -> bool:
@@ -778,8 +861,8 @@ func validate_save_dictionary_detailed(data: Dictionary, root_path: String = "ru
 				return _validation_failure(root_path + ".active_call." + string_field, "String", saved_call.get(string_field), "active call text field is invalid")
 		if str(saved_call.get("call_id", "")) == "" or str(saved_call.get("contact_id", "")) == "":
 			return _validation_failure(root_path + ".active_call", "call_id/contact_id as non-empty Strings", saved_call, "active call identity is incomplete")
-		if str(saved_call.get("status", "")) not in ["incoming_waiting", "active"]:
-			return _validation_failure(root_path + ".active_call.status", "incoming_waiting or active", saved_call.get("status"), "active call status is invalid")
+		if str(saved_call.get("status", "")) not in ["incoming_waiting", "outgoing_waiting", "active", "ending"]:
+			return _validation_failure(root_path + ".active_call.status", "incoming_waiting, outgoing_waiting, active, or ending", saved_call.get("status"), "active call status is invalid")
 		for array_field in ["transcript", "choices_made", "presented_choices"]:
 			if not (saved_call.get(array_field, []) is Array):
 				return _validation_failure(root_path + ".active_call." + array_field, "Array", saved_call.get(array_field), "active call list is invalid")
@@ -808,6 +891,14 @@ func validate_save_dictionary_detailed(data: Dictionary, root_path: String = "ru
 			return _validation_failure(root_path + ".active_call.message_reveal_elapsed", "finite number >= 0", reveal_elapsed_value, "phone reveal elapsed time is invalid")
 		if not (saved_call.get("pending_choice_effects", []) is Array):
 			return _validation_failure(root_path + ".active_call.pending_choice_effects", "Array", saved_call.get("pending_choice_effects"), "pending choice effects are invalid")
+		for end_bool_field in ["call_end_sequence_active", "call_end_audio_started", "call_end_audio_completed"]:
+			if not (saved_call.get(end_bool_field, false) is bool):
+				return _validation_failure(root_path + ".active_call." + end_bool_field, "bool", saved_call.get(end_bool_field), "call ending flag is invalid")
+		var end_elapsed_value: Variant = saved_call.get("call_end_elapsed", 0.0)
+		if not _is_finite_number(end_elapsed_value) or float(end_elapsed_value) < 0.0:
+			return _validation_failure(root_path + ".active_call.call_end_elapsed", "finite number >= 0", end_elapsed_value, "call ending elapsed time is invalid")
+		if not (saved_call.get("call_end_next_node_id", "") is String):
+			return _validation_failure(root_path + ".active_call.call_end_next_node_id", "String", saved_call.get("call_end_next_node_id"), "call ending target is invalid")
 
 	var revealed_value: Variant = data.get("revealed_node_ids", data.get("visit_history", []))
 	if not (revealed_value is Array):
@@ -818,6 +909,16 @@ func validate_save_dictionary_detailed(data: Dictionary, root_path: String = "ru
 		if not (revealed_id_value is String) or str(revealed_id_value) == "" or revealed_ids.has(str(revealed_id_value)):
 			return _validation_failure("%s.revealed_node_ids[%d]" % [root_path, revealed_index], "unique non-empty String", revealed_id_value, "revealed node id is invalid or duplicated")
 		revealed_ids[str(revealed_id_value)] = true
+
+	var revealed_sections_value: Variant = data.get("revealed_section_ids", [])
+	if not (revealed_sections_value is Array):
+		return _validation_failure(root_path + ".revealed_section_ids", "Array<String>", revealed_sections_value, "revealed section container is invalid")
+	var revealed_section_keys: Dictionary = {}
+	for section_index in range((revealed_sections_value as Array).size()):
+		var section_value: Variant = (revealed_sections_value as Array)[section_index]
+		if not (section_value is String) or str(section_value) == "" or revealed_section_keys.has(str(section_value)):
+			return _validation_failure("%s.revealed_section_ids[%d]" % [root_path, section_index], "unique non-empty String", section_value, "revealed section id is invalid or duplicated")
+		revealed_section_keys[str(section_value)] = true
 
 	var reveal_state_value: Variant = data.get("active_text_reveal", {})
 	if not (reveal_state_value is Dictionary):
@@ -837,6 +938,8 @@ func validate_save_dictionary_detailed(data: Dictionary, root_path: String = "ru
 		for reveal_bool_field in ["completed", "waiting_after_reveal", "events_completed"]:
 			if not (reveal_state.get(reveal_bool_field, false) is bool):
 				return _validation_failure(root_path + ".active_text_reveal." + reveal_bool_field, "bool", reveal_state.get(reveal_bool_field), "active reveal flag is invalid")
+		if not (reveal_state.get("reveal_section_id", "") is String):
+			return _validation_failure(root_path + ".active_text_reveal.reveal_section_id", "String", reveal_state.get("reveal_section_id"), "active reveal section id is invalid")
 
 	var completed_events_value: Variant = data.get("completed_after_reveal_events", [])
 	if not (completed_events_value is Array):
@@ -847,6 +950,14 @@ func validate_save_dictionary_detailed(data: Dictionary, root_path: String = "ru
 		if not (event_value is String) or str(event_value) == "" or completed_event_ids.has(str(event_value)):
 			return _validation_failure("%s.completed_after_reveal_events[%d]" % [root_path, event_index], "unique non-empty String", event_value, "completed event id is invalid or duplicated")
 		completed_event_ids[str(event_value)] = true
+
+	var attention_counts_value: Variant = data.get("tutorial_attention_audio_counts", {})
+	if not (attention_counts_value is Dictionary):
+		return _validation_failure(root_path + ".tutorial_attention_audio_counts", "Dictionary<String, int>", attention_counts_value, "tutorial attention audio state is invalid")
+	for attention_key_value in (attention_counts_value as Dictionary).keys():
+		var count_value: Variant = (attention_counts_value as Dictionary)[attention_key_value]
+		if not (attention_key_value is String) or str(attention_key_value) == "" or not _is_integer_number(count_value) or int(count_value) < 0 or int(count_value) > 3:
+			return _validation_failure(root_path + ".tutorial_attention_audio_counts." + str(attention_key_value), "integer 0..3 with non-empty String key", count_value, "tutorial attention audio count is invalid")
 
 	if not (data.get("case_state", {}) is Dictionary):
 		return _validation_failure(root_path + ".case_state", "Dictionary", data.get("case_state"), "rewindable case state is invalid")
@@ -864,6 +975,26 @@ func validate_save_dictionary_detailed(data: Dictionary, root_path: String = "ru
 	for active_value in (active_indices_value as Array):
 		if not _is_integer_number(active_value) or int(active_value) < 0:
 			return _validation_failure(root_path + ".active_transition_indices", "non-negative integer entries", active_value, "active path index is invalid")
+
+	var investigation_time_value: Variant = data.get("investigation_time", -1)
+	if not _is_integer_number(investigation_time_value) or int(investigation_time_value) < -1:
+		return _validation_failure(root_path + ".investigation_time", "integer >= -1", investigation_time_value, "investigation time is invalid")
+	for dictionary_field in ["assistant_state", "police_state", "event_flags", "pollution_node_states"]:
+		if not (data.get(dictionary_field, {}) is Dictionary):
+			return _validation_failure(root_path + "." + dictionary_field, "Dictionary", data.get(dictionary_field), "optional investigation state is invalid")
+	if not (data.get("active_actions", []) is Array) or not (data.get("completed_actions", []) is Array) or not (data.get("action_history", []) is Array):
+		return _validation_failure(root_path + ".active_actions", "Array action state", data.get("active_actions"), "optional action state is invalid")
+	for history_value in (data.get("action_history", []) as Array):
+		if not (history_value is Dictionary):
+			return _validation_failure(root_path + ".action_history", "Array<Dictionary>", history_value, "action history entry is invalid")
+	var completed_action_ids: Dictionary = {}
+	for completed_value in (data.get("completed_actions", []) as Array):
+		if not (completed_value is String) or str(completed_value) == "" or completed_action_ids.has(str(completed_value)):
+			return _validation_failure(root_path + ".completed_actions", "unique non-empty String entries", completed_value, "completed action id is invalid")
+		completed_action_ids[str(completed_value)] = true
+	for bool_field in ["witness_protected", "killer_alerted", "killer_controlled"]:
+		if not (data.get(bool_field, false) is bool):
+			return _validation_failure(root_path + "." + bool_field, "bool", data.get(bool_field), "optional investigation flag is invalid")
 
 	return {"valid": true, "status": "available", "error": ""}
 
@@ -939,12 +1070,22 @@ func apply_save_dictionary(data: Dictionary) -> bool:
 		var revealed_id := str(node_value)
 		if revealed_id != "" and not revealed_node_ids.has(revealed_id):
 			revealed_node_ids.append(revealed_id)
+	revealed_section_ids.clear()
+	for section_value in (data.get("revealed_section_ids", []) as Array):
+		var section_id := str(section_value)
+		if section_id != "" and not revealed_section_ids.has(section_id):
+			revealed_section_ids.append(section_id)
 	active_text_reveal = (data.get("active_text_reveal", {}) as Dictionary).duplicate(true)
 	completed_after_reveal_events.clear()
 	for event_value in (data.get("completed_after_reveal_events", []) as Array):
 		var event_id := str(event_value)
 		if event_id != "" and not completed_after_reveal_events.has(event_id):
 			completed_after_reveal_events.append(event_id)
+	tutorial_attention_audio_counts.clear()
+	for attention_event_value in (data.get("tutorial_attention_audio_counts", {}) as Dictionary).keys():
+		var attention_event_id := str(attention_event_value)
+		if attention_event_id != "" and int((data.get("tutorial_attention_audio_counts", {}) as Dictionary)[attention_event_value]) >= 1:
+			tutorial_attention_audio_counts[attention_event_id] = 1
 	case_state = (data.get("case_state", {}) as Dictionary).duplicate(true)
 	history_snapshots.clear()
 	var saved_snapshots: Variant = data.get("history_snapshots", [])
@@ -961,6 +1102,27 @@ func apply_save_dictionary(data: Dictionary) -> bool:
 			active_transition_indices.append(int(index_value))
 	else:
 		active_transition_indices = _infer_active_transition_indices(history_cursor)
+	investigation_time = int(data.get("investigation_time", -1))
+	assistant_state = (data.get("assistant_state", {}) as Dictionary).duplicate(true)
+	police_state = (data.get("police_state", {}) as Dictionary).duplicate(true)
+	active_actions.clear()
+	for action_value in (data.get("active_actions", []) as Array):
+		if action_value is Dictionary:
+			active_actions.append((action_value as Dictionary).duplicate(true))
+	completed_actions.clear()
+	for action_value in (data.get("completed_actions", []) as Array):
+		var action_id := str(action_value)
+		if action_id != "" and not completed_actions.has(action_id):
+			completed_actions.append(action_id)
+	action_history.clear()
+	for action_value in (data.get("action_history", []) as Array):
+		if action_value is Dictionary:
+			action_history.append((action_value as Dictionary).duplicate(true))
+	event_flags = (data.get("event_flags", {}) as Dictionary).duplicate(true)
+	pollution_node_states = (data.get("pollution_node_states", {}) as Dictionary).duplicate(true)
+	witness_protected = bool(data.get("witness_protected", false))
+	killer_alerted = bool(data.get("killer_alerted", false))
+	killer_controlled = bool(data.get("killer_controlled", false))
 	_rebuild_runtime_indexes()
 	return true
 
@@ -980,11 +1142,24 @@ func reset_runtime_state() -> void:
 	discovered_contacts = ["assistant"]
 	active_call.clear()
 	revealed_node_ids.clear()
+	revealed_section_ids.clear()
 	active_text_reveal.clear()
 	completed_after_reveal_events.clear()
+	tutorial_attention_audio_counts.clear()
 	case_state.clear()
 	history_snapshots.clear()
 	active_transition_indices.clear()
+	investigation_time = -1
+	assistant_state.clear()
+	police_state.clear()
+	active_actions.clear()
+	completed_actions.clear()
+	action_history.clear()
+	event_flags.clear()
+	pollution_node_states.clear()
+	witness_protected = false
+	killer_alerted = false
+	killer_controlled = false
 	_issued_keyword_ids.clear()
 	_rebuild_runtime_indexes()
 
