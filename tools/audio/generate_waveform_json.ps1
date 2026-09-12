@@ -38,29 +38,54 @@ try {
         throw "Decoded audio contains no samples: $inputPath"
     }
 
-    $peaks = New-Object System.Collections.Generic.List[double]
+    $bucketMinimums = New-Object System.Collections.Generic.List[double]
+    $bucketMaximums = New-Object System.Collections.Generic.List[double]
     for ($bucket = 0; $bucket -lt $SampleCount; $bucket++) {
         $start = [int][math]::Floor($bucket * $floatCount / $SampleCount)
         $end = [int][math]::Ceiling(($bucket + 1) * $floatCount / $SampleCount)
-        $peak = 0.0
+        $minimum = 1.0
+        $maximum = -1.0
         for ($index = $start; $index -lt [math]::Min($end, $floatCount); $index++) {
-            $value = [math]::Abs([BitConverter]::ToSingle($bytes, $index * 4))
-            if ($value -gt $peak) { $peak = $value }
+            $value = [BitConverter]::ToSingle($bytes, $index * 4)
+            if ($value -lt $minimum) { $minimum = $value }
+            if ($value -gt $maximum) { $maximum = $value }
         }
-        $peaks.Add($peak)
+        $bucketMinimums.Add($minimum)
+        $bucketMaximums.Add($maximum)
     }
 
-    $maximum = ($peaks | Measure-Object -Maximum).Maximum
-    if ($maximum -le 0.0) { $maximum = 1.0 }
-    $normalized = @($peaks | ForEach-Object { [math]::Round($_ / $maximum, 6) })
+    $normalizationMaximum = 0.0
+    for ($bucket = 0; $bucket -lt $SampleCount; $bucket++) {
+        $absoluteMinimum = [math]::Abs($bucketMinimums[$bucket])
+        $absoluteMaximum = [math]::Abs($bucketMaximums[$bucket])
+        $normalizationMaximum = [math]::Max(
+            $normalizationMaximum,
+            [math]::Max($absoluteMinimum, $absoluteMaximum)
+        )
+    }
+    if ($normalizationMaximum -le 0.0) { $normalizationMaximum = 1.0 }
+
+    $normalizedPeaks = New-Object System.Collections.Generic.List[object]
+    $normalizedSamples = New-Object System.Collections.Generic.List[double]
+    for ($bucket = 0; $bucket -lt $SampleCount; $bucket++) {
+        $normalizedMinimum = [math]::Round($bucketMinimums[$bucket] / $normalizationMaximum, 6)
+        $normalizedMaximum = [math]::Round($bucketMaximums[$bucket] / $normalizationMaximum, 6)
+        $normalizedPeaks.Add([object]@($normalizedMinimum, $normalizedMaximum))
+        $normalizedSamples.Add(
+            [math]::Round([math]::Max([math]::Abs($normalizedMinimum), [math]::Abs($normalizedMaximum)), 6)
+        )
+    }
+
     $duration = $floatCount / 12000.0
     $resourcePath = "res://" + $inputPath.Substring($projectRoot.Length).TrimStart('\').Replace('\', '/')
     $document = [ordered]@{
+        version = 1
         audio_path = $resourcePath
         duration = [math]::Round($duration, 6)
         sample_count = $SampleCount
-        method = "peak_max_abs_normalized"
-        samples = $normalized
+        method = "peak_min_max_normalized"
+        peaks = $normalizedPeaks
+        samples = $normalizedSamples
     }
     $document | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $outputPath -Encoding utf8
 }
